@@ -1,7 +1,6 @@
 import psycopg2
 import os
 import bcrypt
-from datetime import datetime, timedelta
 
 class Database:
     def __init__(self):
@@ -107,62 +106,6 @@ class Database:
             'accuracy': accuracy,
             'category_distribution': category_distribution
         }
-
-    def get_accuracy_over_time(self, days=30):
-        with self.conn.cursor() as cur:
-            cur.execute("""
-                SELECT DATE(created_at) as date,
-                       COUNT(*) FILTER (WHERE category = ai_category AND subcategory = ai_subcategory) as correct,
-                       COUNT(*) as total
-                FROM images
-                WHERE created_at >= %s
-                GROUP BY DATE(created_at)
-                ORDER BY DATE(created_at)
-            """, (datetime.now() - timedelta(days=days),))
-            return [{'date': row[0], 'accuracy': (row[1] / row[2]) * 100 if row[2] > 0 else 0} for row in cur.fetchall()]
-
-    def get_confusion_matrix(self):
-        with self.conn.cursor() as cur:
-            cur.execute("""
-                SELECT ai_category, category, COUNT(*)
-                FROM images
-                GROUP BY ai_category, category
-            """)
-            return [{'ai_category': row[0], 'true_category': row[1], 'count': row[2]} for row in cur.fetchall()]
-
-    def get_top_misclassifications(self, limit=10):
-        with self.conn.cursor() as cur:
-            cur.execute("""
-                SELECT ai_category, category, COUNT(*) as count
-                FROM images
-                WHERE ai_category != category
-                GROUP BY ai_category, category
-                ORDER BY count DESC
-                LIMIT %s
-            """, (limit,))
-            return [{'ai_category': row[0], 'true_category': row[1], 'count': row[2]} for row in cur.fetchall()]
-
-    def get_performance_by_category(self):
-        with self.conn.cursor() as cur:
-            cur.execute("""
-                SELECT category,
-                       COUNT(*) FILTER (WHERE category = ai_category) as correct,
-                       COUNT(*) as total
-                FROM images
-                GROUP BY category
-            """)
-            return [{'category': row[0], 'accuracy': (row[1] / row[2]) * 100 if row[2] > 0 else 0, 'total': row[2]} for row in cur.fetchall()]
-
-    def get_user_activity(self):
-        with self.conn.cursor() as cur:
-            cur.execute("""
-                SELECT u.username, COUNT(i.id) as image_count
-                FROM users u
-                LEFT JOIN images i ON u.id = i.user_id
-                GROUP BY u.id, u.username
-                ORDER BY image_count DESC
-            """)
-            return [{'username': row[0], 'image_count': row[1]} for row in cur.fetchall()]
 
     def create_user(self, username, password, role='user'):
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
