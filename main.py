@@ -157,34 +157,74 @@ def review_page():
     # Get all images from the database
     images = db.get_all_images()
     
-    # Display images in a grid
-    cols = st.columns(3)
-    for idx, image in enumerate(images):
-        with cols[idx % 3]:
-            st.image(base64.b64decode(image['image_data']), use_column_width=True)
-            st.write(f"Current: {image['category']} - {image['subcategory']}")
-            
-            # Correction form
-            with st.form(f"correct_form_{idx}"):
-                new_category = st.selectbox("New Category", ai_model.model.main_categories + ['Uncategorized'], key=f"cat_{idx}")
-                if new_category != 'Uncategorized':
-                    new_subcategory = st.selectbox("New Subcategory", ai_model.model.subcategories[new_category], key=f"subcat_{idx}")
-                else:
-                    new_subcategory = 'Uncategorized'
-                if st.form_submit_button("Correct"):
-                    db.update_categorization(image['id'], new_category, new_subcategory)
-                    # Learn from manual categorization
-                    ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), new_category, new_subcategory)
-                    st.success("Categorization updated and model updated!")
-            
-            # Download button
-            if st.button(f"Download Image {idx}"):
-                st.download_button(
-                    label="Download Image",
-                    data=base64.b64decode(image['image_data']),
-                    file_name=image['filename'],
-                    mime="image/png"
-                )
+    # Initialize current_index in session state if not present
+    if 'current_index' not in st.session_state:
+        st.session_state.current_index = 0
+    
+    # Navigation buttons
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("Previous") and st.session_state.current_index > 0:
+            st.session_state.current_index -= 1
+    with col3:
+        if st.button("Next") and st.session_state.current_index < len(images) - 1:
+            st.session_state.current_index += 1
+    
+    # Display current image
+    if images:
+        image = images[st.session_state.current_index]
+        st.image(base64.b64decode(image['image_data']), use_column_width=True)
+        st.write(f"Current: {image['category']} - {image['subcategory']}")
+        
+        # Create buttons for main categories
+        st.write("Select Main Category:")
+        main_categories = ai_model.model.main_categories + ['Uncategorized']
+        main_category_cols = st.columns(len(main_categories))
+        selected_main_category = None
+        
+        for i, category in enumerate(main_categories):
+            with main_category_cols[i]:
+                if st.button(category):
+                    selected_main_category = category
+        
+        # If a main category is selected, show subcategory buttons
+        if selected_main_category:
+            st.write(f"Select Subcategory for {selected_main_category}:")
+            if selected_main_category != 'Uncategorized':
+                subcategories = ai_model.model.subcategories[selected_main_category]
+                subcategory_cols = st.columns(len(subcategories))
+                for i, subcategory in enumerate(subcategories):
+                    with subcategory_cols[i]:
+                        if st.button(subcategory):
+                            # Update categorization
+                            db.update_categorization(image['id'], selected_main_category, subcategory)
+                            # Learn from manual categorization
+                            ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), selected_main_category, subcategory)
+                            st.success("Categorization updated and model updated!")
+                            # Move to next image
+                            if st.session_state.current_index < len(images) - 1:
+                                st.session_state.current_index += 1
+                            st.rerun()
+            else:
+                # For 'Uncategorized', update directly
+                db.update_categorization(image['id'], 'Uncategorized', 'Uncategorized')
+                ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), 'Uncategorized', 'Uncategorized')
+                st.success("Categorization updated to Uncategorized and model updated!")
+                # Move to next image
+                if st.session_state.current_index < len(images) - 1:
+                    st.session_state.current_index += 1
+                st.rerun()
+        
+        # Download button
+        if st.button("Download Current Image"):
+            st.download_button(
+                label="Download Image",
+                data=base64.b64decode(image['image_data']),
+                file_name=image['filename'],
+                mime="image/png"
+            )
+    else:
+        st.write("No images to review.")
 
 def statistics_page():
     st.header("AI Performance Analytics Dashboard")
