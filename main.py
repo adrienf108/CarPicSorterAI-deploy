@@ -31,16 +31,18 @@ def upload_page():
     if uploaded_files:
         for file in uploaded_files:
             image = Image.open(file)
-            resized_image = resize_image(image)
-            image_data = image_to_base64(resized_image)
             
-            # Predict category and subcategory
-            category, subcategory = ai_model.predict(resized_image)
+            # Predict category and subcategory using full image
+            category, subcategory = ai_model.predict(image)
+            
+            # Resize image for display purposes only
+            display_image = resize_image(image, size=(300, 300))
+            image_data = image_to_base64(display_image)
             
             # Save to database
             db.save_image(file.name, image_data, category, subcategory)
             
-            st.image(resized_image, caption=f"{file.name}: {category} - {subcategory}", use_column_width=True)
+            st.image(display_image, caption=f"{file.name}: {category} - {subcategory}", use_column_width=True)
 
 def review_page():
     st.header("Review and Correct Categorizations")
