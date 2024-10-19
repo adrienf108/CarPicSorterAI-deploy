@@ -25,7 +25,7 @@ def main():
         st.sidebar.write(f"Logged in as: {st.session_state.user['role']}")
         if st.sidebar.button("Logout"):
             logout()
-            st.experimental_rerun()
+            st.rerun()
     else:
         st.sidebar.write("Not logged in")
         
@@ -49,7 +49,7 @@ def login_page():
     if st.button("Login"):
         if authenticate_user(username, password):
             st.success("Logged in successfully!")
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error("Invalid username or password")
 
