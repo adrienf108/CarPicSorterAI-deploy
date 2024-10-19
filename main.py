@@ -6,23 +6,84 @@ import base64
 from database import Database
 from ai_model import AIModel
 from image_utils import resize_image, image_to_base64
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 
 # Initialize database and AI model
 db = Database()
 ai_model = AIModel()
 
+# Initialize Flask-Login
+login_manager = LoginManager()
+
+class User(UserMixin):
+    def __init__(self, id, username, role):
+        self.id = id
+        self.username = username
+        self.role = role
+
+@login_manager.user_loader
+def load_user(user_id):
+    user = db.get_user_by_username(user_id)
+    if user:
+        return User(user[0], user[1], user[3])
+    return None
+
 def main():
     st.title("AI-powered Car Image Categorization")
 
-    # Sidebar for navigation
-    page = st.sidebar.selectbox("Choose a page", ["Upload", "Review", "Statistics"])
-
-    if page == "Upload":
-        upload_page()
-    elif page == "Review":
-        review_page()
+    # Check if user is logged in
+    if not st.session_state.get('user'):
+        login_page()
     else:
-        statistics_page()
+        # Sidebar for navigation
+        page = st.sidebar.selectbox("Choose a page", ["Upload", "Review", "Statistics", "User Management"])
+
+        if page == "Upload":
+            upload_page()
+        elif page == "Review":
+            review_page()
+        elif page == "Statistics":
+            statistics_page()
+        elif page == "User Management" and st.session_state['user'].role == 'admin':
+            user_management_page()
+        else:
+            st.warning("You don't have permission to access this page.")
+
+        if st.sidebar.button("Logout"):
+            st.session_state['user'] = None
+            st.experimental_rerun()
+
+def login_page():
+    st.header("Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Login"):
+            user = db.get_user_by_username(username)
+            if user and bcrypt.checkpw(password.encode('utf-8'), user[2].encode('utf-8')):
+                st.session_state['user'] = User(user[0], user[1], user[3])
+                st.success("Logged in successfully!")
+                st.experimental_rerun()
+            else:
+                st.error("Invalid username or password")
+    
+    with col2:
+        if st.button("Register"):
+            if username and password:
+                existing_user = db.get_user_by_username(username)
+                if existing_user:
+                    st.error("Username already exists")
+                else:
+                    user_count = len(db.get_all_users())
+                    role = 'admin' if user_count == 0 else 'user'
+                    user_id = db.create_user(username, password, role)
+                    st.session_state['user'] = User(user_id, username, role)
+                    st.success("Registered successfully!")
+                    st.experimental_rerun()
+            else:
+                st.error("Please enter both username and password")
 
 def upload_page():
     st.header("Upload Car Images")
@@ -40,7 +101,7 @@ def upload_page():
             image_data = image_to_base64(display_image)
             
             # Save to database
-            db.save_image(file.name, image_data, main_category, subcategory)
+            db.save_image(file.name, image_data, main_category, subcategory, st.session_state['user'].id)
             
             if main_category == 'Uncategorized':
                 st.image(display_image, caption=f"{file.name}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
@@ -72,6 +133,15 @@ def review_page():
                     # Learn from manual categorization
                     ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), new_category, new_subcategory)
                     st.success("Categorization updated and model updated!")
+            
+            # Download button
+            if st.button(f"Download Image {idx}"):
+                st.download_button(
+                    label="Download Image",
+                    data=base64.b64decode(image['image_data']),
+                    file_name=image['filename'],
+                    mime="image/png"
+                )
 
 def statistics_page():
     st.header("Categorization Statistics")
@@ -87,6 +157,18 @@ def statistics_page():
     st.subheader("Category Distribution")
     category_df = pd.DataFrame(stats['category_distribution'])
     st.bar_chart(category_df.set_index('category'))
+
+def user_management_page():
+    st.header("User Management")
+    
+    users = db.get_all_users()
+    for user in users:
+        st.write(f"Username: {user['username']}, Role: {user['role']}")
+        if user['role'] == 'user':
+            if st.button(f"Promote {user['username']} to Admin"):
+                db.update_user_role(user['id'], 'admin')
+                st.success(f"{user['username']} promoted to Admin")
+                st.experimental_rerun()
 
 if __name__ == "__main__":
     main()

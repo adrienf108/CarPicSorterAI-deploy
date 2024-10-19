@@ -1,5 +1,6 @@
 import psycopg2
 import os
+import bcrypt
 
 class Database:
     def __init__(self):
@@ -15,6 +16,15 @@ class Database:
     def create_tables(self):
         with self.conn.cursor() as cur:
             cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("""
                 CREATE TABLE IF NOT EXISTS images (
                     id SERIAL PRIMARY KEY,
                     filename TEXT NOT NULL,
@@ -23,29 +33,31 @@ class Database:
                     subcategory TEXT NOT NULL,
                     ai_category TEXT NOT NULL,
                     ai_subcategory TEXT NOT NULL,
+                    user_id INTEGER REFERENCES users(id),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
         self.conn.commit()
 
-    def save_image(self, filename, image_data, category, subcategory):
+    def save_image(self, filename, image_data, category, subcategory, user_id):
         with self.conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO images (filename, image_data, category, subcategory, ai_category, ai_subcategory)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (filename, image_data, category, subcategory, category, subcategory))
+                INSERT INTO images (filename, image_data, category, subcategory, ai_category, ai_subcategory, user_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (filename, image_data, category, subcategory, category, subcategory, user_id))
         self.conn.commit()
 
     def get_all_images(self):
         with self.conn.cursor() as cur:
-            cur.execute("SELECT id, filename, image_data, category, subcategory FROM images")
+            cur.execute("SELECT id, filename, image_data, category, subcategory, user_id FROM images")
             return [
                 {
                     'id': row[0],
                     'filename': row[1],
                     'image_data': row[2],
                     'category': row[3],
-                    'subcategory': row[4]
+                    'subcategory': row[4],
+                    'user_id': row[5]
                 }
                 for row in cur.fetchall()
             ]
@@ -86,3 +98,30 @@ class Database:
             'category_distribution': category_distribution
         }
 
+    def create_user(self, username, password, role='user'):
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO users (username, password_hash, role)
+                VALUES (%s, %s, %s)
+                RETURNING id
+            """, (username, hashed_password.decode('utf-8'), role))
+            user_id = cur.fetchone()[0]
+        self.conn.commit()
+        return user_id
+
+    def get_user_by_username(self, username):
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT id, username, password_hash, role FROM users WHERE username = %s", (username,))
+            user = cur.fetchone()
+        return user if user else None
+
+    def update_user_role(self, user_id, new_role):
+        with self.conn.cursor() as cur:
+            cur.execute("UPDATE users SET role = %s WHERE id = %s", (new_role, user_id))
+        self.conn.commit()
+
+    def get_all_users(self):
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT id, username, role FROM users")
+            return [{'id': row[0], 'username': row[1], 'role': row[2]} for row in cur.fetchall()]
