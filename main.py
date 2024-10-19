@@ -106,6 +106,11 @@ def upload_page():
         status_text = st.empty()
 
         for i, file in enumerate(uploaded_files):
+            # Update progress for upload
+            upload_progress = (i + 0.5) / total_files
+            progress_bar.progress(upload_progress)
+            status_text.text(f"Uploading and processing {i+1}/{total_files} images")
+
             image = Image.open(file)
             
             # Predict category and subcategory using full image
@@ -123,9 +128,9 @@ def upload_page():
             else:
                 st.image(display_image, caption=f"{file.name}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
             
-            # Update progress
-            progress = (i + 1) / total_files
-            progress_bar.progress(progress)
+            # Update progress for processing
+            process_progress = (i + 1) / total_files
+            progress_bar.progress(process_progress)
             status_text.text(f"Processed {i+1}/{total_files} images")
 
         st.success(f"Successfully uploaded and processed {total_files} images!")
