@@ -55,10 +55,7 @@ def main():
 
         if st.sidebar.button("Logout"):
             st.session_state['user'] = None
-            try:
-                st.rerun()
-            except RerunException:
-                pass
+            st.rerun()
 
 def login_page():
     st.header("Login")
@@ -72,10 +69,7 @@ def login_page():
             if user and bcrypt.checkpw(password.encode('utf-8'), user[2].encode('utf-8')):
                 st.session_state['user'] = User(user[0], user[1], user[3])
                 st.success("Logged in successfully!")
-                try:
-                    st.rerun()
-                except RerunException:
-                    pass
+                st.rerun()
             else:
                 st.error("Invalid username or password")
     
@@ -91,10 +85,7 @@ def login_page():
                     user_id = db.create_user(username, password, role)
                     st.session_state['user'] = User(user_id, username, role)
                     st.success("Registered successfully!")
-                    try:
-                        st.rerun()
-                    except RerunException:
-                        pass
+                    st.rerun()
             else:
                 st.error("Please enter both username and password")
 
@@ -124,19 +115,15 @@ def upload_page():
         status_text = st.empty()
 
         for i, (filename, image) in enumerate(all_images):
-            # Update progress for upload
             upload_progress = (i + 0.5) / total_files
             progress_bar.progress(upload_progress)
             status_text.text(f"Uploading and processing {i+1}/{total_files} images")
 
-            # Predict category and subcategory using full image
             main_category, subcategory, confidence = ai_model.predict(image)
 
-            # Resize image for display purposes only
             display_image = resize_image(image, size=(300, 300))
             image_data = image_to_base64(display_image)
 
-            # Save to database
             db.save_image(filename, image_data, main_category, subcategory, st.session_state['user'].id, float(confidence))
 
             if main_category == 'Uncategorized':
@@ -144,7 +131,6 @@ def upload_page():
             else:
                 st.image(display_image, caption=f"{filename}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
 
-            # Update progress for processing
             process_progress = (i + 1) / total_files
             progress_bar.progress(process_progress)
             status_text.text(f"Processed {i+1}/{total_files} images")
@@ -154,67 +140,61 @@ def upload_page():
 def review_page():
     st.header("Review and Correct Categorizations")
     
-    # Get all images from the database
     images = db.get_all_images()
     
-    # Create a grid layout
-    cols = st.columns(3)
-    for i, image in enumerate(images):
-        with cols[i % 3]:
-            image_container = st.empty()
-            image_container.image(base64.b64decode(image['image_data']), use_column_width=True)
-            st.write(f"Current: {image['category']} - {image['subcategory']}")
-            
-            # Use a unique key for each set of buttons
-            button_key = f"buttons_{image['id']}"
-            
-            if button_key not in st.session_state:
-                st.session_state[button_key] = {"state": "main", "selected_category": None}
-            
-            button_container = st.empty()
-            
-            if st.session_state[button_key]["state"] == "main":
-                main_buttons = []
-                for category in ai_model.model.main_categories + ['Uncategorized']:
-                    main_buttons.append(button_container.button(category, key=f"{button_key}_{category}"))
-                
-                for idx, clicked in enumerate(main_buttons):
-                    if clicked:
-                        st.session_state[button_key]["state"] = "sub"
-                        st.session_state[button_key]["selected_category"] = ai_model.model.main_categories[idx] if idx < len(ai_model.model.main_categories) else 'Uncategorized'
-                        st.rerun()
-            
-            elif st.session_state[button_key]["state"] == "sub":
-                selected_category = st.session_state[button_key]["selected_category"]
-                if selected_category != 'Uncategorized':
-                    sub_buttons = []
-                    for subcategory in ai_model.model.subcategories[selected_category]:
-                        sub_buttons.append(button_container.button(subcategory, key=f"{button_key}_{subcategory}"))
-                    
-                    for idx, clicked in enumerate(sub_buttons):
-                        if clicked:
-                            subcategory = ai_model.model.subcategories[selected_category][idx]
-                            db.update_categorization(image['id'], selected_category, subcategory)
-                            ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), selected_category, subcategory)
-                            st.session_state[button_key]["state"] = "main"
-                            st.rerun()
-                else:
-                    if button_container.button("Confirm Uncategorized", key=f"{button_key}_uncategorized"):
-                        db.update_categorization(image['id'], 'Uncategorized', 'Uncategorized')
-                        st.session_state[button_key]["state"] = "main"
-                        st.rerun()
-                
-                if button_container.button("Back", key=f"{button_key}_back"):
-                    st.session_state[button_key]["state"] = "main"
+    if 'current_image_index' not in st.session_state:
+        st.session_state['current_image_index'] = 0
+
+    if st.session_state['current_image_index'] >= len(images):
+        st.success("All images have been reviewed!")
+        return
+
+    image = images[st.session_state['current_image_index']]
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.image(base64.b64decode(image['image_data']), use_column_width=True)
+    
+    with col2:
+        st.write(f"Current: {image['category']} - {image['subcategory']}")
+        
+        st.write("Select Main Category:")
+        for category in ai_model.model.main_categories:
+            if st.button(category, key=f"main_{category}"):
+                st.session_state['selected_main_category'] = category
+                st.rerun()
+        
+        if 'selected_main_category' in st.session_state:
+            st.write(f"Select Subcategory for {st.session_state['selected_main_category']}:")
+            for subcategory in ai_model.model.subcategories[st.session_state['selected_main_category']]:
+                if st.button(subcategory, key=f"sub_{subcategory}"):
+                    db.update_categorization(image['id'], st.session_state['selected_main_category'], subcategory)
+                    ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), st.session_state['selected_main_category'], subcategory)
+                    st.session_state['current_image_index'] += 1
+                    del st.session_state['selected_main_category']
                     st.rerun()
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("Previous Image") and st.session_state['current_image_index'] > 0:
+            st.session_state['current_image_index'] -= 1
+            if 'selected_main_category' in st.session_state:
+                del st.session_state['selected_main_category']
+            st.rerun()
+    
+    with col3:
+        if st.button("Next Image") and st.session_state['current_image_index'] < len(images) - 1:
+            st.session_state['current_image_index'] += 1
+            if 'selected_main_category' in st.session_state:
+                del st.session_state['selected_main_category']
+            st.rerun()
 
 def statistics_page():
     st.header("AI Performance Analytics Dashboard")
     
-    # Get statistics from the database
     stats = db.get_statistics()
     
-    # Display overall statistics
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Total Images", stats['total_images'])
@@ -223,19 +203,16 @@ def statistics_page():
     with col3:
         st.metric("Unique Categories", len(stats['category_distribution']))
     
-    # Display category distribution
     st.subheader("Category Distribution")
     category_df = pd.DataFrame(stats['category_distribution'])
     fig = px.pie(category_df, values='count', names='category', title='Category Distribution')
     st.plotly_chart(fig)
     
-    # Display accuracy over time
     st.subheader("Accuracy Over Time")
     accuracy_df = pd.DataFrame(stats['accuracy_over_time'])
     fig = px.line(accuracy_df, x='date', y='accuracy', title='AI Model Accuracy Over Time')
     st.plotly_chart(fig)
     
-    # Display confusion matrix
     st.subheader("Confusion Matrix")
     confusion_matrix = stats['confusion_matrix']
     fig = px.imshow(confusion_matrix, 
@@ -245,13 +222,11 @@ def statistics_page():
     fig.update_layout(title='Confusion Matrix')
     st.plotly_chart(fig)
     
-    # Display top misclassifications
     st.subheader("Top Misclassifications")
     misclassifications = stats['top_misclassifications']
     misclass_df = pd.DataFrame(misclassifications)
     st.table(misclass_df)
     
-    # Display confidence distribution
     st.subheader("Confidence Distribution")
     confidence_df = pd.DataFrame(stats['confidence_distribution'])
     fig = px.histogram(confidence_df, x='confidence', nbins=20, title='Distribution of AI Confidence Scores')
@@ -267,10 +242,7 @@ def user_management_page():
             if st.button(f"Promote {user['username']} to Admin"):
                 db.update_user_role(user['id'], 'admin')
                 st.success(f"{user['username']} promoted to Admin")
-                try:
-                    st.rerun()
-                except RerunException:
-                    pass
+                st.rerun()
 
 if __name__ == "__main__":
     main()
