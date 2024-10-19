@@ -49,7 +49,7 @@ class Database:
         self.conn.commit()
         self.create_tables()
 
-    def save_image(self, filename, image_data, category, subcategory, user_id, ai_confidence):
+    def save_image(self, filename, image_data, category, subcategory, user_id, ai_confidence: float):
         with self.conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO images (filename, image_data, category, subcategory, ai_category, ai_subcategory, ai_confidence, user_id)

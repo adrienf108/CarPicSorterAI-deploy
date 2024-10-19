@@ -137,7 +137,7 @@ def upload_page():
             image_data = image_to_base64(display_image)
 
             # Save to database
-            db.save_image(filename, image_data, main_category, subcategory, st.session_state['user'].id, confidence)
+            db.save_image(filename, image_data, main_category, subcategory, st.session_state['user'].id, float(confidence))
 
             if main_category == 'Uncategorized':
                 st.image(display_image, caption=f"{filename}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)

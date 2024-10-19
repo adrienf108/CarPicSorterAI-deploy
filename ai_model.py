@@ -13,7 +13,7 @@ class AIModel:
         # Get predictions
         main_category, subcategory, confidence = self.model.predict(preprocessed_image)
         
-        return main_category, subcategory, confidence
+        return main_category, subcategory, float(confidence)
 
     def preprocess_image(self, image):
         # image is now a PIL Image object
