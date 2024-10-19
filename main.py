@@ -33,7 +33,7 @@ def upload_page():
             image = Image.open(file)
             
             # Predict category and subcategory using full image
-            main_category, subcategory = ai_model.predict(image)
+            main_category, subcategory, confidence = ai_model.predict(image)
             
             # Resize image for display purposes only
             display_image = resize_image(image, size=(300, 300))
@@ -42,7 +42,10 @@ def upload_page():
             # Save to database
             db.save_image(file.name, image_data, main_category, subcategory)
             
-            st.image(display_image, caption=f"{file.name}: {main_category} - {subcategory}", use_column_width=True)
+            if main_category == 'Uncategorized':
+                st.image(display_image, caption=f"{file.name}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
+            else:
+                st.image(display_image, caption=f"{file.name}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
 
 def review_page():
     st.header("Review and Correct Categorizations")
@@ -59,11 +62,16 @@ def review_page():
             
             # Correction form
             with st.form(f"correct_form_{idx}"):
-                new_category = st.selectbox("New Category", ai_model.model.main_categories, key=f"cat_{idx}")
-                new_subcategory = st.selectbox("New Subcategory", ai_model.model.subcategories[new_category], key=f"subcat_{idx}")
+                new_category = st.selectbox("New Category", ai_model.model.main_categories + ['Uncategorized'], key=f"cat_{idx}")
+                if new_category != 'Uncategorized':
+                    new_subcategory = st.selectbox("New Subcategory", ai_model.model.subcategories[new_category], key=f"subcat_{idx}")
+                else:
+                    new_subcategory = 'Uncategorized'
                 if st.form_submit_button("Correct"):
                     db.update_categorization(image['id'], new_category, new_subcategory)
-                    st.success("Categorization updated!")
+                    # Learn from manual categorization
+                    ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), new_category, new_subcategory)
+                    st.success("Categorization updated and model updated!")
 
 def statistics_page():
     st.header("Categorization Statistics")

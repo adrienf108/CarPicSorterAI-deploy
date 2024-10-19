@@ -6,14 +6,17 @@ from tensorflow.keras.models import Model
 class CustomModel:
     def __init__(self):
         # Define the main categories and subcategories
-        self.main_categories = ['Sedan', 'SUV', 'Truck', 'Van', 'Sports Car']
+        self.main_categories = ['Exterior', 'Interior', 'Engine', 'Undercarriage', 'Documents']
         self.subcategories = {
-            'Sedan': ['Compact', 'Mid-size', 'Full-size', 'Luxury'],
-            'SUV': ['Compact', 'Mid-size', 'Full-size', 'Luxury'],
-            'Truck': ['Light-duty', 'Medium-duty', 'Heavy-duty'],
-            'Van': ['Minivan', 'Full-size', 'Cargo'],
-            'Sports Car': ['Coupe', 'Convertible', 'Supercar']
+            'Exterior': ['3/4 front view', 'Side profile', '3/4 rear view', 'Rear view', 'Wheels', 'Details', 'Defects'],
+            'Interior': ['Full interior view', 'Dashboard', 'Front seats', "Driver's seat", 'Rear seats', 'Steering wheel', 'Gear shift', 'Pedals and floor mats', 'Gauges/Instrument cluster', 'Details', 'Trunk/Boot'],
+            'Engine': ['Full view', 'Detail'],
+            'Undercarriage': ['Undercarriage'],
+            'Documents': ['Invoices/Receipts', 'Service book', 'Technical inspections/MOT certificates']
         }
+        
+        # Set confidence threshold
+        self.confidence_threshold = 0.7
         
         # Create the model
         self.model = self._create_model()
@@ -41,15 +44,20 @@ class CustomModel:
         # Make predictions
         main_pred, subcategory_pred = self.model.predict(preprocessed_image)
         
-        # Get the main category
+        # Get the main category and its confidence
         main_category_index = tf.argmax(main_pred[0]).numpy()
+        main_category_confidence = tf.reduce_max(main_pred[0]).numpy()
+        
+        if main_category_confidence < self.confidence_threshold:
+            return 'Uncategorized', 'Uncategorized', main_category_confidence
+        
         main_category = self.main_categories[main_category_index]
         
         # Get the subcategory
         subcategory_index = tf.argmax(subcategory_pred[0]).numpy()
-        subcategory = self.subcategories[main_category][subcategory_index]
+        subcategory = self.subcategories[main_category][subcategory_index % len(self.subcategories[main_category])]
         
-        return main_category, subcategory
+        return main_category, subcategory, main_category_confidence
 
     def preprocess_image(self, image):
         # Resize the image to 224x224
@@ -59,3 +67,8 @@ class CustomModel:
         # Add batch dimension
         image = tf.expand_dims(image, 0)
         return image
+
+    def learn_from_manual_categorization(self, image, main_category, subcategory):
+        # This is a placeholder for future implementation of learning from manual categorizations
+        # In a real-world scenario, you would update the model based on this new information
+        pass
