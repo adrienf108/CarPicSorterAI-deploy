@@ -108,9 +108,13 @@ def upload_page():
             if uploaded_file.type == "application/zip":
                 with zipfile.ZipFile(uploaded_file) as z:
                     for filename in z.namelist():
-                        if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                        if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and not filename.startswith('__MACOSX/'):
                             with z.open(filename) as file:
-                                all_images.append((filename, Image.open(file)))
+                                try:
+                                    img = Image.open(file)
+                                    all_images.append((filename, img))
+                                except Exception as e:
+                                    st.warning(f"Skipped file {filename}: {str(e)}")
             else:
                 all_images.append((uploaded_file.name, Image.open(uploaded_file)))
 
@@ -132,7 +136,7 @@ def upload_page():
             image_data = image_to_base64(display_image)
 
             # Save to database
-            db.save_image(filename, image_data, main_category, subcategory, st.session_state['user'].id)
+            db.save_image(filename, image_data, main_category, subcategory, st.session_state['user'].id, confidence)
 
             if main_category == 'Uncategorized':
                 st.image(display_image, caption=f"{filename}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
