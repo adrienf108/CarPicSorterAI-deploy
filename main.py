@@ -29,7 +29,7 @@ def main():
     else:
         st.sidebar.write("Not logged in")
         
-    pages = ["Login", "Register", "Upload", "Review", "Statistics", "Admin"]
+    pages = ["Login", "Register", "Upload", "Review", "Statistics", "Admin", "Delete All Users"]
     
     page = st.sidebar.selectbox("Choose a page", pages)
 
@@ -45,6 +45,8 @@ def main():
         statistics_page()
     elif page == "Admin":
         admin_page()
+    elif page == "Delete All Users":
+        delete_all_users_page()
 
 def login_page():
     st.header("Login")
@@ -164,6 +166,20 @@ def admin_page():
             st.success(f"User {username_to_promote} has been promoted to admin.")
         else:
             st.error("Failed to promote user to admin. Make sure the username exists and you have admin privileges.")
+    
+    if st.button("Go to Delete All Users Page"):
+        st.session_state.page = "Delete All Users"
+        st.rerun()
+
+@admin_required
+def delete_all_users_page():
+    st.header("Delete All Users")
+    st.warning("This action will delete all users from the database. Are you sure?")
+    if st.button("Delete All Users"):
+        db.delete_all_users()
+        st.success("All users have been deleted.")
+        logout()  # Force logout after deleting all users
+        st.rerun()
 
 if __name__ == "__main__":
     main()
