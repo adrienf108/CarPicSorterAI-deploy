@@ -184,55 +184,55 @@ def review_page():
     
     # Create a grid layout
     cols = st.columns(3)
-    selected_images = []
-    
     for i, image in enumerate(page_images):
         with cols[i % 3]:
             st.image(base64.b64decode(image['image_data']), use_column_width=True)
             st.write(f"Current: {image['category']} - {image['subcategory']}")
-            if st.checkbox(f"Select image {i+1}"):
-                selected_images.append(image)
-    
-    # Batch categorization
-    if selected_images:
-        st.subheader("Batch Categorization")
-        
-        # Main category selection
-        st.write("Select Main Category:")
-        main_category = None
-        main_category_cols = st.columns(3)
-        for i, category in enumerate(ai_model.model.main_categories + ['Uncategorized']):
-            with main_category_cols[i % 3]:
-                if st.button(category, key=f"main_{category}"):
-                    main_category = category
-        
-        # Subcategory selection
-        if main_category and main_category != 'Uncategorized':
-            st.write("Select Subcategory:")
-            subcategory = None
-            subcategory_cols = st.columns(3)
-            for i, sub in enumerate(ai_model.model.subcategories[main_category]):
-                with subcategory_cols[i % 3]:
-                    if st.button(sub, key=f"sub_{sub}"):
-                        subcategory = sub
-        else:
-            subcategory = 'Uncategorized'
-        
-        # Update button
-        if main_category and subcategory:
-            if st.button("Update Selected Images"):
-                for image in selected_images:
-                    db.update_categorization(image['id'], main_category, subcategory)
-                    ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), main_category, subcategory)
-                st.success(f"Updated {len(selected_images)} images")
-                
-                # Auto-navigation: Move to the next page
-                if st.session_state.current_page < total_pages:
-                    st.session_state.current_page += 1
+            
+            # Use a unique key for each set of buttons
+            button_key = f"buttons_{image['id']}"
+            
+            if button_key not in st.session_state:
+                st.session_state[button_key] = {"state": "main", "selected_category": None}
+            
+            if st.session_state[button_key]["state"] == "main":
+                for category in ai_model.model.main_categories + ['Uncategorized']:
+                    if st.button(category, key=f"{button_key}_{category}"):
+                        st.session_state[button_key]["state"] = "sub"
+                        st.session_state[button_key]["selected_category"] = category
+                        st.rerun()
+            
+            elif st.session_state[button_key]["state"] == "sub":
+                selected_category = st.session_state[button_key]["selected_category"]
+                if selected_category != 'Uncategorized':
+                    for subcategory in ai_model.model.subcategories[selected_category]:
+                        if st.button(subcategory, key=f"{button_key}_{subcategory}"):
+                            db.update_categorization(image['id'], selected_category, subcategory)
+                            ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), selected_category, subcategory)
+                            st.session_state[button_key]["state"] = "main"
+                            
+                            # Auto-navigation: Move to the next page
+                            if st.session_state.current_page < total_pages:
+                                st.session_state.current_page += 1
+                            else:
+                                st.session_state.current_page = 1
+                            
+                            st.rerun()
                 else:
-                    st.session_state.current_page = 1
+                    db.update_categorization(image['id'], 'Uncategorized', 'Uncategorized')
+                    st.session_state[button_key]["state"] = "main"
+                    
+                    # Auto-navigation: Move to the next page
+                    if st.session_state.current_page < total_pages:
+                        st.session_state.current_page += 1
+                    else:
+                        st.session_state.current_page = 1
+                    
+                    st.rerun()
                 
-                st.rerun()
+                if st.button("Back", key=f"{button_key}_back"):
+                    st.session_state[button_key]["state"] = "main"
+                    st.rerun()
 
 def statistics_page():
     st.header("AI Performance Analytics Dashboard")
