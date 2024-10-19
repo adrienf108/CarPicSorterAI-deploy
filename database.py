@@ -15,7 +15,7 @@ class Database:
 
     def create_tables(self):
         with self.conn.cursor() as cur:
-            cur.execute("""
+            cur.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
                     username TEXT UNIQUE NOT NULL,
@@ -23,7 +23,7 @@ class Database:
                     role TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            """)
+            ''')
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS images (
                     id SERIAL PRIMARY KEY,
@@ -38,6 +38,12 @@ class Database:
                 )
             """)
         self.conn.commit()
+
+    def reset_users_table(self):
+        with self.conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS users")
+        self.conn.commit()
+        self.create_tables()
 
     def save_image(self, filename, image_data, category, subcategory, user_id):
         with self.conn.cursor() as cur:
@@ -125,3 +131,7 @@ class Database:
         with self.conn.cursor() as cur:
             cur.execute("SELECT id, username, role FROM users")
             return [{'id': row[0], 'username': row[1], 'role': row[2]} for row in cur.fetchall()]
+
+if __name__ == "__main__":
+    db = Database()
+    db.reset_users_table()
