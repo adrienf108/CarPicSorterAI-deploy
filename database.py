@@ -1,6 +1,8 @@
 import psycopg2
 import os
 import bcrypt
+import pandas as pd
+from datetime import datetime, timedelta
 
 class Database:
     def __init__(self):
@@ -33,6 +35,7 @@ class Database:
                     subcategory TEXT NOT NULL,
                     ai_category TEXT NOT NULL,
                     ai_subcategory TEXT NOT NULL,
+                    ai_confidence FLOAT NOT NULL,
                     user_id INTEGER REFERENCES users(id),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -46,12 +49,12 @@ class Database:
         self.conn.commit()
         self.create_tables()
 
-    def save_image(self, filename, image_data, category, subcategory, user_id):
+    def save_image(self, filename, image_data, category, subcategory, user_id, ai_confidence):
         with self.conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO images (filename, image_data, category, subcategory, ai_category, ai_subcategory, user_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (filename, image_data, category, subcategory, category, subcategory, user_id))
+                INSERT INTO images (filename, image_data, category, subcategory, ai_category, ai_subcategory, ai_confidence, user_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (filename, image_data, category, subcategory, category, subcategory, ai_confidence, user_id))
         self.conn.commit()
 
     def get_all_images(self):
@@ -80,19 +83,19 @@ class Database:
 
     def get_statistics(self):
         with self.conn.cursor() as cur:
+            # Total images
             cur.execute("SELECT COUNT(*) FROM images")
-            result = cur.fetchone()
-            total_images = result[0] if result else 0
+            total_images = cur.fetchone()[0]
 
+            # Overall accuracy
             cur.execute("""
                 SELECT COUNT(*) FROM images
                 WHERE category = ai_category AND subcategory = ai_subcategory
             """)
-            result = cur.fetchone()
-            correct_predictions = result[0] if result else 0
-
+            correct_predictions = cur.fetchone()[0]
             accuracy = (correct_predictions / total_images) * 100 if total_images > 0 else 0
 
+            # Category distribution
             cur.execute("""
                 SELECT category, COUNT(*) as count
                 FROM images
@@ -101,10 +104,56 @@ class Database:
             """)
             category_distribution = [{'category': row[0], 'count': row[1]} for row in cur.fetchall()]
 
+            # Accuracy over time
+            cur.execute("""
+                SELECT DATE(created_at) as date,
+                       AVG(CASE WHEN category = ai_category AND subcategory = ai_subcategory THEN 1 ELSE 0 END) * 100 as accuracy
+                FROM images
+                GROUP BY DATE(created_at)
+                ORDER BY date
+            """)
+            accuracy_over_time = [{'date': row[0], 'accuracy': row[1]} for row in cur.fetchall()]
+
+            # Confusion matrix
+            cur.execute("""
+                SELECT ai_category, category, COUNT(*)
+                FROM images
+                GROUP BY ai_category, category
+            """)
+            confusion_matrix = pd.pivot_table(
+                pd.DataFrame(cur.fetchall(), columns=['ai_category', 'category', 'count']),
+                values='count', index='category', columns='ai_category', fill_value=0
+            ).to_dict('split')
+
+            # Top misclassifications
+            cur.execute("""
+                SELECT ai_category, category, COUNT(*) as count
+                FROM images
+                WHERE ai_category != category
+                GROUP BY ai_category, category
+                ORDER BY count DESC
+                LIMIT 10
+            """)
+            top_misclassifications = [
+                {'Predicted': row[0], 'Actual': row[1], 'Count': row[2]}
+                for row in cur.fetchall()
+            ]
+
+            # Confidence distribution
+            cur.execute("""
+                SELECT ai_confidence
+                FROM images
+            """)
+            confidence_distribution = [{'confidence': row[0]} for row in cur.fetchall()]
+
         return {
             'total_images': total_images,
             'accuracy': accuracy,
-            'category_distribution': category_distribution
+            'category_distribution': category_distribution,
+            'accuracy_over_time': accuracy_over_time,
+            'confusion_matrix': confusion_matrix,
+            'top_misclassifications': top_misclassifications,
+            'confidence_distribution': confidence_distribution
         }
 
     def create_user(self, username, password, role='user'):

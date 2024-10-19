@@ -1,9 +1,11 @@
 import streamlit as st
 from streamlit.runtime.scriptrunner import RerunException
 import pandas as pd
+import plotly.express as px
 from PIL import Image
 import io
 import base64
+import zipfile
 from database import Database
 from ai_model import AIModel
 from image_utils import resize_image, image_to_base64
@@ -98,36 +100,45 @@ def login_page():
 
 def upload_page():
     st.header("Upload Car Images")
-    uploaded_files = st.file_uploader("Choose images to upload", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Choose images or zip files to upload", type=["jpg", "jpeg", "png", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
-        total_files = len(uploaded_files)
+        all_images = []
+        for uploaded_file in uploaded_files:
+            if uploaded_file.type == "application/zip":
+                with zipfile.ZipFile(uploaded_file) as z:
+                    for filename in z.namelist():
+                        if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                            with z.open(filename) as file:
+                                all_images.append((filename, Image.open(file)))
+            else:
+                all_images.append((uploaded_file.name, Image.open(uploaded_file)))
+
+        total_files = len(all_images)
         progress_bar = st.progress(0)
         status_text = st.empty()
 
-        for i, file in enumerate(uploaded_files):
+        for i, (filename, image) in enumerate(all_images):
             # Update progress for upload
             upload_progress = (i + 0.5) / total_files
             progress_bar.progress(upload_progress)
             status_text.text(f"Uploading and processing {i+1}/{total_files} images")
 
-            image = Image.open(file)
-            
             # Predict category and subcategory using full image
             main_category, subcategory, confidence = ai_model.predict(image)
-            
+
             # Resize image for display purposes only
             display_image = resize_image(image, size=(300, 300))
             image_data = image_to_base64(display_image)
-            
+
             # Save to database
-            db.save_image(file.name, image_data, main_category, subcategory, st.session_state['user'].id)
-            
+            db.save_image(filename, image_data, main_category, subcategory, st.session_state['user'].id)
+
             if main_category == 'Uncategorized':
-                st.image(display_image, caption=f"{file.name}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
+                st.image(display_image, caption=f"{filename}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
             else:
-                st.image(display_image, caption=f"{file.name}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
-            
+                st.image(display_image, caption=f"{filename}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
+
             # Update progress for processing
             process_progress = (i + 1) / total_files
             progress_bar.progress(process_progress)
@@ -171,19 +182,53 @@ def review_page():
                 )
 
 def statistics_page():
-    st.header("Categorization Statistics")
+    st.header("AI Performance Analytics Dashboard")
     
     # Get statistics from the database
     stats = db.get_statistics()
     
-    # Display statistics
-    st.write(f"Total images: {stats['total_images']}")
-    st.write(f"Accuracy: {stats['accuracy']:.2f}%")
+    # Display overall statistics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Images", stats['total_images'])
+    with col2:
+        st.metric("Overall Accuracy", f"{stats['accuracy']:.2f}%")
+    with col3:
+        st.metric("Unique Categories", len(stats['category_distribution']))
     
     # Display category distribution
     st.subheader("Category Distribution")
     category_df = pd.DataFrame(stats['category_distribution'])
-    st.bar_chart(category_df.set_index('category'))
+    fig = px.pie(category_df, values='count', names='category', title='Category Distribution')
+    st.plotly_chart(fig)
+    
+    # Display accuracy over time
+    st.subheader("Accuracy Over Time")
+    accuracy_df = pd.DataFrame(stats['accuracy_over_time'])
+    fig = px.line(accuracy_df, x='date', y='accuracy', title='AI Model Accuracy Over Time')
+    st.plotly_chart(fig)
+    
+    # Display confusion matrix
+    st.subheader("Confusion Matrix")
+    confusion_matrix = stats['confusion_matrix']
+    fig = px.imshow(confusion_matrix, 
+                    labels=dict(x="Predicted Category", y="True Category", color="Count"),
+                    x=ai_model.model.main_categories,
+                    y=ai_model.model.main_categories)
+    fig.update_layout(title='Confusion Matrix')
+    st.plotly_chart(fig)
+    
+    # Display top misclassifications
+    st.subheader("Top Misclassifications")
+    misclassifications = stats['top_misclassifications']
+    misclass_df = pd.DataFrame(misclassifications)
+    st.table(misclass_df)
+    
+    # Display confidence distribution
+    st.subheader("Confidence Distribution")
+    confidence_df = pd.DataFrame(stats['confidence_distribution'])
+    fig = px.histogram(confidence_df, x='confidence', nbins=20, title='Distribution of AI Confidence Scores')
+    st.plotly_chart(fig)
 
 def user_management_page():
     st.header("User Management")
