@@ -105,32 +105,28 @@ def upload_page():
         progress_bar = st.progress(0)
         status_text = st.empty()
 
-        batch_size = 5  # Process 5 images at a time
-        for i in range(0, total_files, batch_size):
-            batch = uploaded_files[i:i+batch_size]
+        for i, file in enumerate(uploaded_files):
+            image = Image.open(file)
             
-            for file in batch:
-                image = Image.open(file)
-                
-                # Predict category and subcategory using full image
-                main_category, subcategory, confidence = ai_model.predict(image)
-                
-                # Resize image for display purposes only
-                display_image = resize_image(image, size=(300, 300))
-                image_data = image_to_base64(display_image)
-                
-                # Save to database
-                db.save_image(file.name, image_data, main_category, subcategory, st.session_state['user'].id)
-                
-                if main_category == 'Uncategorized':
-                    st.image(display_image, caption=f"{file.name}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
-                else:
-                    st.image(display_image, caption=f"{file.name}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
+            # Predict category and subcategory using full image
+            main_category, subcategory, confidence = ai_model.predict(image)
+            
+            # Resize image for display purposes only
+            display_image = resize_image(image, size=(300, 300))
+            image_data = image_to_base64(display_image)
+            
+            # Save to database
+            db.save_image(file.name, image_data, main_category, subcategory, st.session_state['user'].id)
+            
+            if main_category == 'Uncategorized':
+                st.image(display_image, caption=f"{file.name}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
+            else:
+                st.image(display_image, caption=f"{file.name}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
             
             # Update progress
-            progress = min((i + batch_size) / total_files, 1.0)
+            progress = (i + 1) / total_files
             progress_bar.progress(progress)
-            status_text.text(f"Processed {min(i+batch_size, total_files)}/{total_files} images")
+            status_text.text(f"Processed {i+1}/{total_files} images")
 
         st.success(f"Successfully uploaded and processed {total_files} images!")
 
