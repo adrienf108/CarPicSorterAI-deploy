@@ -31,7 +31,7 @@ class Database:
                     id SERIAL PRIMARY KEY,
                     username TEXT UNIQUE NOT NULL,
                     password TEXT NOT NULL,
-                    role TEXT NOT NULL
+                    role TEXT NOT NULL CHECK (role IN ('admin', 'user'))
                 )
             """)
         self.conn.commit()
@@ -130,3 +130,7 @@ class Database:
                     'role': user[3]
                 }
         return None
+
+    def is_admin(self, user_id):
+        user = self.get_user(user_id)
+        return user and user['role'] == 'admin'

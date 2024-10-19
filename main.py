@@ -6,7 +6,7 @@ import base64
 from database import Database
 from ai_model import AIModel
 from image_utils import resize_image, image_to_base64
-from auth import init_auth, register_user, authenticate_user, logout, get_current_user_role, login_required
+from auth import init_auth, register_user, create_admin_user, authenticate_user, logout, get_current_user_role, login_required, admin_required
 
 # Initialize database and AI model
 db = Database()
@@ -29,7 +29,11 @@ def main():
     else:
         st.sidebar.write("Not logged in")
         
-    page = st.sidebar.selectbox("Choose a page", ["Login", "Register", "Upload", "Review", "Statistics"])
+    pages = ["Login", "Register", "Upload", "Review", "Statistics"]
+    if st.session_state.user and st.session_state.user['role'] == 'admin':
+        pages.append("Create Admin")
+    
+    page = st.sidebar.selectbox("Choose a page", pages)
 
     if page == "Login":
         login_page()
@@ -41,6 +45,8 @@ def main():
         review_page()
     elif page == "Statistics":
         statistics_page()
+    elif page == "Create Admin":
+        admin_create_page()
 
 def login_page():
     st.header("Login")
@@ -57,19 +63,25 @@ def register_page():
     st.header("Register")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
-    role = st.selectbox("Role", ["uploader", "reviewer", "admin"])
     if st.button("Register"):
-        if register_user(username, password, role):
+        if register_user(username, password):
             st.success("Registered successfully! Please log in.")
         else:
             st.error("Registration failed. Username may already exist.")
 
+@admin_required
+def admin_create_page():
+    st.header("Create Admin User")
+    username = st.text_input("Admin Username")
+    password = st.text_input("Admin Password", type="password")
+    if st.button("Create Admin"):
+        if create_admin_user(username, password, st.session_state.user['id']):
+            st.success("Admin user created successfully!")
+        else:
+            st.error("Failed to create admin user.")
+
 @login_required
 def upload_page():
-    if st.session_state.user['role'] not in ['uploader', 'admin']:
-        st.warning("You need to be an uploader or admin to access this page.")
-        return
-
     st.header("Upload Car Images")
     uploaded_files = st.file_uploader("Choose images to upload", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
@@ -94,10 +106,6 @@ def upload_page():
 
 @login_required
 def review_page():
-    if st.session_state.user['role'] not in ['reviewer', 'admin']:
-        st.warning("You need to be a reviewer or admin to access this page.")
-        return
-
     st.header("Review and Correct Categorizations")
     
     # Get all images from the database
@@ -123,12 +131,8 @@ def review_page():
                     ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), new_category, new_subcategory)
                     st.success("Categorization updated and model updated!")
 
-@login_required
+@admin_required
 def statistics_page():
-    if st.session_state.user['role'] != 'admin':
-        st.warning("You need to be an admin to access this page.")
-        return
-
     st.header("Categorization Statistics")
     
     # Get statistics from the database

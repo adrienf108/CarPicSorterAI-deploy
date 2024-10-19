@@ -8,9 +8,15 @@ def init_auth():
     if 'user' not in st.session_state:
         st.session_state.user = None
 
-def register_user(username, password, role):
+def register_user(username, password):
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-    return db.create_user(username, hashed_password.decode('utf-8'), role)
+    return db.create_user(username, hashed_password.decode('utf-8'), 'user')
+
+def create_admin_user(username, password, current_user_id):
+    if not db.is_admin(current_user_id):
+        return False
+    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    return db.create_user(username, hashed_password.decode('utf-8'), 'admin')
 
 def authenticate_user(username, password):
     user_data = db.get_user_by_username(username)
@@ -33,6 +39,14 @@ def login_required(func):
     def wrapper(*args, **kwargs):
         if st.session_state.user is None:
             st.warning("You need to be logged in to access this page.")
+            st.stop()
+        return func(*args, **kwargs)
+    return wrapper
+
+def admin_required(func):
+    def wrapper(*args, **kwargs):
+        if st.session_state.user is None or st.session_state.user['role'] != 'admin':
+            st.warning("You need to be an admin to access this page.")
             st.stop()
         return func(*args, **kwargs)
     return wrapper
