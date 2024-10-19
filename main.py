@@ -101,7 +101,11 @@ def upload_page():
     uploaded_files = st.file_uploader("Choose images to upload", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
     if uploaded_files:
-        for file in uploaded_files:
+        total_files = len(uploaded_files)
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+
+        for i, file in enumerate(uploaded_files):
             image = Image.open(file)
             
             # Predict category and subcategory using full image
@@ -114,10 +118,17 @@ def upload_page():
             # Save to database
             db.save_image(file.name, image_data, main_category, subcategory, st.session_state['user'].id)
             
+            # Update progress
+            progress = (i + 1) / total_files
+            progress_bar.progress(progress)
+            status_text.text(f"Processed {i+1}/{total_files} images")
+
             if main_category == 'Uncategorized':
                 st.image(display_image, caption=f"{file.name}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
             else:
                 st.image(display_image, caption=f"{file.name}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
+
+        st.success(f"Successfully uploaded and processed {total_files} images!")
 
 def review_page():
     st.header("Review and Correct Categorizations")
