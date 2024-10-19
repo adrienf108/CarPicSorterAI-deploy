@@ -24,7 +24,7 @@ class Database:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-            cur.execute("""
+            cur.execute('''
                 CREATE TABLE IF NOT EXISTS images (
                     id SERIAL PRIMARY KEY,
                     filename TEXT NOT NULL,
@@ -36,12 +36,18 @@ class Database:
                     user_id INTEGER REFERENCES users(id),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            """)
+            ''')
         self.conn.commit()
 
     def reset_users_table(self):
         with self.conn.cursor() as cur:
             cur.execute("DROP TABLE IF EXISTS users")
+        self.conn.commit()
+        self.create_tables()
+
+    def reset_images_table(self):
+        with self.conn.cursor() as cur:
+            cur.execute('DROP TABLE IF EXISTS images')
         self.conn.commit()
         self.create_tables()
 
@@ -135,3 +141,4 @@ class Database:
 if __name__ == "__main__":
     db = Database()
     db.reset_users_table()
+    db.reset_images_table()
