@@ -6,91 +6,24 @@ import base64
 from database import Database
 from ai_model import AIModel
 from image_utils import resize_image, image_to_base64
-from auth import init_auth, register_user, create_admin_user, authenticate_user, logout, get_current_user_role, login_required, admin_required, promote_user_to_admin
 
 # Initialize database and AI model
 db = Database()
 ai_model = AIModel()
 
-# Initialize authentication
-init_auth()
-
 def main():
     st.title("AI-powered Car Image Categorization")
 
-    # Sidebar for navigation and authentication
-    st.sidebar.title("Navigation")
-    
-    if st.session_state.user:
-        st.sidebar.write(f"Logged in as: {st.session_state.user['role']}")
-        if st.sidebar.button("Logout"):
-            logout()
-            st.rerun()
-    else:
-        st.sidebar.write("Not logged in")
-        
-    pages = ["Login", "Register", "Upload", "Review", "Statistics", "Admin", "Delete All Users"]
-    
-    page = st.sidebar.selectbox("Choose a page", pages)
+    # Sidebar for navigation
+    page = st.sidebar.selectbox("Choose a page", ["Upload", "Review", "Statistics"])
 
-    if page == "Login":
-        login_page()
-    elif page == "Register":
-        register_page()
-    elif page == "Upload":
+    if page == "Upload":
         upload_page()
     elif page == "Review":
         review_page()
-    elif page == "Statistics":
+    else:
         statistics_page()
-    elif page == "Admin":
-        admin_page()
-    elif page == "Delete All Users":
-        delete_all_users_page()
 
-def login_page():
-    st.header("Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        if authenticate_user(username, password):
-            st.success("Logged in successfully!")
-            st.rerun()
-        else:
-            st.error("Invalid username or password")
-
-def register_page():
-    st.header("Register")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    
-    # Check if there are any existing users
-    existing_users = db.get_all_users()
-    
-    is_admin = False
-    if not existing_users:
-        is_admin = st.checkbox("Create as admin user (first user only)")
-    
-    if st.button("Register"):
-        role = 'admin' if is_admin else 'user'
-        result = register_user(username, password, role)
-        if result:
-            st.success(f"Registered successfully as {'admin' if is_admin else 'user'}! Please log in.")
-        else:
-            st.error("Registration failed. Username may already exist.")
-
-@admin_required
-def admin_create_page():
-    st.header("Create Admin User")
-    username = st.text_input("Admin Username")
-    password = st.text_input("Admin Password", type="password")
-    if st.button("Create Admin"):
-        if create_admin_user(username, password, st.session_state.user['id']):
-            st.success("Admin user created successfully!")
-        else:
-            st.error("Failed to create admin user.")
-
-@login_required
 def upload_page():
     st.header("Upload Car Images")
     uploaded_files = st.file_uploader("Choose images to upload", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
@@ -114,7 +47,6 @@ def upload_page():
             else:
                 st.image(display_image, caption=f"{file.name}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
 
-@login_required
 def review_page():
     st.header("Review and Correct Categorizations")
     
@@ -141,7 +73,6 @@ def review_page():
                     ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), new_category, new_subcategory)
                     st.success("Categorization updated and model updated!")
 
-@admin_required
 def statistics_page():
     st.header("Categorization Statistics")
     
@@ -156,30 +87,6 @@ def statistics_page():
     st.subheader("Category Distribution")
     category_df = pd.DataFrame(stats['category_distribution'])
     st.bar_chart(category_df.set_index('category'))
-
-@admin_required
-def admin_page():
-    st.header("Admin Actions")
-    username_to_promote = st.text_input("Username to promote to admin")
-    if st.button("Promote to Admin"):
-        if promote_user_to_admin(username_to_promote, st.session_state.user['id']):
-            st.success(f"User {username_to_promote} has been promoted to admin.")
-        else:
-            st.error("Failed to promote user to admin. Make sure the username exists and you have admin privileges.")
-    
-    if st.button("Go to Delete All Users Page"):
-        st.session_state.page = "Delete All Users"
-        st.rerun()
-
-@admin_required
-def delete_all_users_page():
-    st.header("Delete All Users")
-    st.warning("This action will delete all users from the database. Are you sure?")
-    if st.button("Delete All Users"):
-        db.delete_all_users()
-        st.success("All users have been deleted.")
-        logout()  # Force logout after deleting all users
-        st.rerun()
 
 if __name__ == "__main__":
     main()
