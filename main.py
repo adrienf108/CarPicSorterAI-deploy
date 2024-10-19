@@ -64,7 +64,8 @@ def register_page():
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
     if st.button("Register"):
-        if register_user(username, password):
+        result = register_user(username, password)
+        if result:
             st.success("Registered successfully! Please log in.")
         else:
             st.error("Registration failed. Username may already exist.")

@@ -1,6 +1,7 @@
 import streamlit as st
 from database import Database
 import bcrypt
+import psycopg2
 
 db = Database()
 
@@ -9,8 +10,11 @@ def init_auth():
         st.session_state.user = None
 
 def register_user(username, password):
-    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-    return db.create_user(username, hashed_password.decode('utf-8'), 'user')
+    try:
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+        return db.create_user(username, hashed_password.decode('utf-8'), 'user')
+    except psycopg2.errors.UniqueViolation:
+        return None
 
 def create_admin_user(username, password, current_user_id):
     if not db.is_admin(current_user_id):
