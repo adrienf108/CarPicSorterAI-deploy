@@ -111,7 +111,8 @@ def upload_page():
                         if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and not filename.startswith('__MACOSX/'):
                             with z.open(filename) as file:
                                 try:
-                                    img = Image.open(file)
+                                    img_data = file.read()
+                                    img = Image.open(io.BytesIO(img_data))
                                     all_images.append((filename, img))
                                 except Exception as e:
                                     st.warning(f"Skipped file {filename}: {str(e)}")

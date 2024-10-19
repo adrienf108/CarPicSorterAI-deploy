@@ -7,7 +7,7 @@ class AIModel:
         self.model = CustomModel()
 
     def predict(self, image):
-        # Preprocess the image
+        # image is now a PIL Image object
         preprocessed_image = self.preprocess_image(image)
         
         # Get predictions
@@ -16,7 +16,7 @@ class AIModel:
         return main_category, subcategory, confidence
 
     def preprocess_image(self, image):
-        # Convert PIL Image to numpy array
+        # image is now a PIL Image object
         img_array = np.array(image)
         # Use the CustomModel's preprocess_image method
         return self.model.preprocess_image(img_array)
