@@ -26,6 +26,14 @@ class Database:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    username TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL,
+                    role TEXT NOT NULL
+                )
+            """)
         self.conn.commit()
 
     def save_image(self, filename, image_data, category, subcategory):
@@ -86,3 +94,39 @@ class Database:
             'category_distribution': category_distribution
         }
 
+    def create_user(self, username, password, role):
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO users (username, password, role)
+                VALUES (%s, %s, %s)
+                RETURNING id
+            """, (username, password, role))
+            user_id = cur.fetchone()[0]
+        self.conn.commit()
+        return user_id
+
+    def get_user(self, user_id):
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT id, username, password, role FROM users WHERE id = %s", (user_id,))
+            user = cur.fetchone()
+            if user:
+                return {
+                    'id': user[0],
+                    'username': user[1],
+                    'password': user[2],
+                    'role': user[3]
+                }
+        return None
+
+    def get_user_by_username(self, username):
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT id, username, password, role FROM users WHERE username = %s", (username,))
+            user = cur.fetchone()
+            if user:
+                return {
+                    'id': user[0],
+                    'username': user[1],
+                    'password': user[2],
+                    'role': user[3]
+                }
+        return None

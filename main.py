@@ -6,25 +6,70 @@ import base64
 from database import Database
 from ai_model import AIModel
 from image_utils import resize_image, image_to_base64
+from auth import init_auth, register_user, authenticate_user, logout, get_current_user_role, login_required
 
 # Initialize database and AI model
 db = Database()
 ai_model = AIModel()
 
+# Initialize authentication
+init_auth()
+
 def main():
     st.title("AI-powered Car Image Categorization")
 
-    # Sidebar for navigation
-    page = st.sidebar.selectbox("Choose a page", ["Upload", "Review", "Statistics"])
+    # Sidebar for navigation and authentication
+    st.sidebar.title("Navigation")
+    
+    if st.session_state.user:
+        st.sidebar.write(f"Logged in as: {st.session_state.user['role']}")
+        if st.sidebar.button("Logout"):
+            logout()
+            st.experimental_rerun()
+    else:
+        st.sidebar.write("Not logged in")
+        
+    page = st.sidebar.selectbox("Choose a page", ["Login", "Register", "Upload", "Review", "Statistics"])
 
-    if page == "Upload":
+    if page == "Login":
+        login_page()
+    elif page == "Register":
+        register_page()
+    elif page == "Upload":
         upload_page()
     elif page == "Review":
         review_page()
-    else:
+    elif page == "Statistics":
         statistics_page()
 
+def login_page():
+    st.header("Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if authenticate_user(username, password):
+            st.success("Logged in successfully!")
+            st.experimental_rerun()
+        else:
+            st.error("Invalid username or password")
+
+def register_page():
+    st.header("Register")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    role = st.selectbox("Role", ["uploader", "reviewer", "admin"])
+    if st.button("Register"):
+        if register_user(username, password, role):
+            st.success("Registered successfully! Please log in.")
+        else:
+            st.error("Registration failed. Username may already exist.")
+
+@login_required
 def upload_page():
+    if st.session_state.user['role'] not in ['uploader', 'admin']:
+        st.warning("You need to be an uploader or admin to access this page.")
+        return
+
     st.header("Upload Car Images")
     uploaded_files = st.file_uploader("Choose images to upload", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
@@ -47,7 +92,12 @@ def upload_page():
             else:
                 st.image(display_image, caption=f"{file.name}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
 
+@login_required
 def review_page():
+    if st.session_state.user['role'] not in ['reviewer', 'admin']:
+        st.warning("You need to be a reviewer or admin to access this page.")
+        return
+
     st.header("Review and Correct Categorizations")
     
     # Get all images from the database
@@ -73,7 +123,12 @@ def review_page():
                     ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), new_category, new_subcategory)
                     st.success("Categorization updated and model updated!")
 
+@login_required
 def statistics_page():
+    if st.session_state.user['role'] != 'admin':
+        st.warning("You need to be an admin to access this page.")
+        return
+
     st.header("Categorization Statistics")
     
     # Get statistics from the database
