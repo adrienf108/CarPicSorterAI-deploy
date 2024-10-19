@@ -1,4 +1,5 @@
 import streamlit as st
+from streamlit.runtime.scriptrunner import RerunException
 import pandas as pd
 from PIL import Image
 import io
@@ -7,6 +8,7 @@ from database import Database
 from ai_model import AIModel
 from image_utils import resize_image, image_to_base64
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+import bcrypt
 
 # Initialize database and AI model
 db = Database()
@@ -51,7 +53,10 @@ def main():
 
         if st.sidebar.button("Logout"):
             st.session_state['user'] = None
-            st.experimental_rerun()
+            try:
+                st.rerun()
+            except RerunException:
+                pass
 
 def login_page():
     st.header("Login")
@@ -65,7 +70,10 @@ def login_page():
             if user and bcrypt.checkpw(password.encode('utf-8'), user[2].encode('utf-8')):
                 st.session_state['user'] = User(user[0], user[1], user[3])
                 st.success("Logged in successfully!")
-                st.experimental_rerun()
+                try:
+                    st.rerun()
+                except RerunException:
+                    pass
             else:
                 st.error("Invalid username or password")
     
@@ -81,7 +89,10 @@ def login_page():
                     user_id = db.create_user(username, password, role)
                     st.session_state['user'] = User(user_id, username, role)
                     st.success("Registered successfully!")
-                    st.experimental_rerun()
+                    try:
+                        st.rerun()
+                    except RerunException:
+                        pass
             else:
                 st.error("Please enter both username and password")
 
@@ -168,7 +179,10 @@ def user_management_page():
             if st.button(f"Promote {user['username']} to Admin"):
                 db.update_user_role(user['id'], 'admin')
                 st.success(f"{user['username']} promoted to Admin")
-                st.experimental_rerun()
+                try:
+                    st.rerun()
+                except RerunException:
+                    pass
 
 if __name__ == "__main__":
     main()
