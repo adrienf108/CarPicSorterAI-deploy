@@ -210,24 +210,10 @@ def review_page():
                             db.update_categorization(image['id'], selected_category, subcategory)
                             ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), selected_category, subcategory)
                             st.session_state[button_key]["state"] = "main"
-                            
-                            # Auto-navigation: Move to the next page
-                            if st.session_state.current_page < total_pages:
-                                st.session_state.current_page += 1
-                            else:
-                                st.session_state.current_page = 1
-                            
                             st.rerun()
                 else:
                     db.update_categorization(image['id'], 'Uncategorized', 'Uncategorized')
                     st.session_state[button_key]["state"] = "main"
-                    
-                    # Auto-navigation: Move to the next page
-                    if st.session_state.current_page < total_pages:
-                        st.session_state.current_page += 1
-                    else:
-                        st.session_state.current_page = 1
-                    
                     st.rerun()
                 
                 if st.button("Back", key=f"{button_key}_back"):
