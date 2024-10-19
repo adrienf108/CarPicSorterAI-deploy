@@ -1,6 +1,9 @@
 import streamlit as st
 from streamlit.runtime.scriptrunner import RerunException
 import pandas as pd
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
 from PIL import Image
 import io
 import base64
@@ -38,14 +41,14 @@ def main():
         login_page()
     else:
         # Sidebar for navigation
-        page = st.sidebar.selectbox("Choose a page", ["Upload", "Review", "Statistics", "User Management"])
+        page = st.sidebar.selectbox("Choose a page", ["Upload", "Review", "Analytics", "User Management"])
 
         if page == "Upload":
             upload_page()
         elif page == "Review":
             review_page()
-        elif page == "Statistics":
-            statistics_page()
+        elif page == "Analytics":
+            analytics_page()
         elif page == "User Management" and st.session_state['user'].role == 'admin':
             user_management_page()
         else:
@@ -170,20 +173,61 @@ def review_page():
                     mime="image/png"
                 )
 
-def statistics_page():
-    st.header("Categorization Statistics")
+def analytics_page():
+    st.header("Advanced Analytics Dashboard")
     
     # Get statistics from the database
     stats = db.get_statistics()
     
-    # Display statistics
-    st.write(f"Total images: {stats['total_images']}")
-    st.write(f"Accuracy: {stats['accuracy']:.2f}%")
-    
-    # Display category distribution
-    st.subheader("Category Distribution")
-    category_df = pd.DataFrame(stats['category_distribution'])
-    st.bar_chart(category_df.set_index('category'))
+    # Display overall statistics
+    st.subheader("Overall Statistics")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Images", stats['total_images'])
+    col2.metric("Overall Accuracy", f"{stats['accuracy']:.2f}%")
+    col3.metric("Total Categories", len(stats['category_distribution']))
+
+    # Accuracy over time
+    st.subheader("Accuracy Over Time")
+    accuracy_data = db.get_accuracy_over_time()
+    df_accuracy = pd.DataFrame(accuracy_data)
+    fig_accuracy = px.line(df_accuracy, x='date', y='accuracy', title='Accuracy Trend')
+    st.plotly_chart(fig_accuracy)
+
+    # Confusion Matrix
+    st.subheader("Confusion Matrix")
+    confusion_data = db.get_confusion_matrix()
+    df_confusion = pd.DataFrame(confusion_data)
+    pivot_confusion = df_confusion.pivot(index='ai_category', columns='true_category', values='count').fillna(0)
+    fig_confusion = px.imshow(pivot_confusion, labels=dict(x="True Category", y="Predicted Category", color="Count"), 
+                              x=pivot_confusion.columns, y=pivot_confusion.index, aspect="auto")
+    st.plotly_chart(fig_confusion)
+
+    # Top Misclassifications
+    st.subheader("Top Misclassifications")
+    misclassifications = db.get_top_misclassifications()
+    df_misclass = pd.DataFrame(misclassifications)
+    fig_misclass = px.bar(df_misclass, x='ai_category', y='count', color='true_category', 
+                          labels={'ai_category': 'Predicted Category', 'count': 'Count', 'true_category': 'True Category'},
+                          title='Top Misclassifications')
+    st.plotly_chart(fig_misclass)
+
+    # Performance by Category
+    st.subheader("Performance by Category")
+    category_performance = db.get_performance_by_category()
+    df_performance = pd.DataFrame(category_performance)
+    fig_performance = px.bar(df_performance, x='category', y='accuracy', color='total', 
+                             labels={'category': 'Category', 'accuracy': 'Accuracy (%)', 'total': 'Total Images'},
+                             title='Accuracy by Category')
+    st.plotly_chart(fig_performance)
+
+    # User Activity
+    st.subheader("User Activity")
+    user_activity = db.get_user_activity()
+    df_activity = pd.DataFrame(user_activity)
+    fig_activity = px.bar(df_activity, x='username', y='image_count', 
+                          labels={'username': 'User', 'image_count': 'Number of Images Uploaded'},
+                          title='User Activity')
+    st.plotly_chart(fig_activity)
 
 def user_management_page():
     st.header("User Management")
