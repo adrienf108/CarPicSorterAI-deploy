@@ -33,16 +33,16 @@ def upload_page():
             image = Image.open(file)
             
             # Predict category and subcategory using full image
-            category, subcategory = ai_model.predict(image)
+            main_category, subcategory = ai_model.predict(image)
             
             # Resize image for display purposes only
             display_image = resize_image(image, size=(300, 300))
             image_data = image_to_base64(display_image)
             
             # Save to database
-            db.save_image(file.name, image_data, category, subcategory)
+            db.save_image(file.name, image_data, main_category, subcategory)
             
-            st.image(display_image, caption=f"{file.name}: {category} - {subcategory}", use_column_width=True)
+            st.image(display_image, caption=f"{file.name}: {main_category} - {subcategory}", use_column_width=True)
 
 def review_page():
     st.header("Review and Correct Categorizations")
@@ -59,8 +59,8 @@ def review_page():
             
             # Correction form
             with st.form(f"correct_form_{idx}"):
-                new_category = st.text_input("New Category", key=f"cat_{idx}")
-                new_subcategory = st.text_input("New Subcategory", key=f"subcat_{idx}")
+                new_category = st.selectbox("New Category", ai_model.model.main_categories, key=f"cat_{idx}")
+                new_subcategory = st.selectbox("New Subcategory", ai_model.model.subcategories[new_category], key=f"subcat_{idx}")
                 if st.form_submit_button("Correct"):
                     db.update_categorization(image['id'], new_category, new_subcategory)
                     st.success("Categorization updated!")
