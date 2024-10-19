@@ -39,15 +39,10 @@ class Database:
             ''')
         self.conn.commit()
 
-    def reset_users_table(self):
+    def reset_all_tables(self):
         with self.conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS images")
             cur.execute("DROP TABLE IF EXISTS users")
-        self.conn.commit()
-        self.create_tables()
-
-    def reset_images_table(self):
-        with self.conn.cursor() as cur:
-            cur.execute('DROP TABLE IF EXISTS images')
         self.conn.commit()
         self.create_tables()
 
@@ -86,13 +81,15 @@ class Database:
     def get_statistics(self):
         with self.conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM images")
-            total_images = cur.fetchone()[0] or 0
+            result = cur.fetchone()
+            total_images = result[0] if result else 0
 
             cur.execute("""
                 SELECT COUNT(*) FROM images
                 WHERE category = ai_category AND subcategory = ai_subcategory
             """)
-            correct_predictions = cur.fetchone()[0] or 0
+            result = cur.fetchone()
+            correct_predictions = result[0] if result else 0
 
             accuracy = (correct_predictions / total_images) * 100 if total_images > 0 else 0
 
@@ -118,7 +115,8 @@ class Database:
                 VALUES (%s, %s, %s)
                 RETURNING id
             """, (username, hashed_password.decode('utf-8'), role))
-            user_id = cur.fetchone()[0]
+            result = cur.fetchone()
+            user_id = result[0] if result else None
         self.conn.commit()
         return user_id
 
@@ -140,5 +138,4 @@ class Database:
 
 if __name__ == "__main__":
     db = Database()
-    db.reset_users_table()
-    db.reset_images_table()
+    db.reset_all_tables()
