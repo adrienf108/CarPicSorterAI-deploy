@@ -61,10 +61,19 @@ def register_page():
     st.header("Register")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
+    
+    # Check if there are any existing users
+    existing_users = db.get_all_users()
+    
+    is_admin = False
+    if not existing_users:
+        is_admin = st.checkbox("Create as admin user (first user only)")
+    
     if st.button("Register"):
-        result = register_user(username, password)
+        role = 'admin' if is_admin else 'user'
+        result = register_user(username, password, role)
         if result:
-            st.success("Registered successfully! Please log in.")
+            st.success(f"Registered successfully as {'admin' if is_admin else 'user'}! Please log in.")
         else:
             st.error("Registration failed. Username may already exist.")
 

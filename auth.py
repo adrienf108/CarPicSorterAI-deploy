@@ -9,10 +9,10 @@ def init_auth():
     if 'user' not in st.session_state:
         st.session_state.user = None
 
-def register_user(username, password):
+def register_user(username, password, role='user'):
     try:
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-        return db.create_user(username, hashed_password.decode('utf-8'), 'user')
+        return db.create_user(username, hashed_password.decode('utf-8'), role)
     except psycopg2.errors.UniqueViolation:
         return None
 

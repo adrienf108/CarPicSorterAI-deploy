@@ -152,3 +152,9 @@ class Database:
                 result = cur.fetchone()
             conn.commit()
         return result is not None
+
+    def get_all_users(self):
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, username, role FROM users")
+                return cur.fetchall()
