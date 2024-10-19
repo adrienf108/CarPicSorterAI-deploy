@@ -196,19 +196,43 @@ def review_page():
     # Batch categorization
     if selected_images:
         st.subheader("Batch Categorization")
-        main_category = st.selectbox("Select Main Category", ai_model.model.main_categories + ['Uncategorized'])
         
-        if main_category != 'Uncategorized':
-            subcategory = st.selectbox("Select Subcategory", ai_model.model.subcategories[main_category])
+        # Main category selection
+        st.write("Select Main Category:")
+        main_category = None
+        main_category_cols = st.columns(3)
+        for i, category in enumerate(ai_model.model.main_categories + ['Uncategorized']):
+            with main_category_cols[i % 3]:
+                if st.button(category, key=f"main_{category}"):
+                    main_category = category
+        
+        # Subcategory selection
+        if main_category and main_category != 'Uncategorized':
+            st.write("Select Subcategory:")
+            subcategory = None
+            subcategory_cols = st.columns(3)
+            for i, sub in enumerate(ai_model.model.subcategories[main_category]):
+                with subcategory_cols[i % 3]:
+                    if st.button(sub, key=f"sub_{sub}"):
+                        subcategory = sub
         else:
             subcategory = 'Uncategorized'
         
-        if st.button("Update Selected Images"):
-            for image in selected_images:
-                db.update_categorization(image['id'], main_category, subcategory)
-                ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), main_category, subcategory)
-            st.success(f"Updated {len(selected_images)} images")
-            st.rerun()
+        # Update button
+        if main_category and subcategory:
+            if st.button("Update Selected Images"):
+                for image in selected_images:
+                    db.update_categorization(image['id'], main_category, subcategory)
+                    ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), main_category, subcategory)
+                st.success(f"Updated {len(selected_images)} images")
+                
+                # Auto-navigation: Move to the next page
+                if st.session_state.current_page < total_pages:
+                    st.session_state.current_page += 1
+                else:
+                    st.session_state.current_page = 1
+                
+                st.rerun()
 
 def statistics_page():
     st.header("AI Performance Analytics Dashboard")
