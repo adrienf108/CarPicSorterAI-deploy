@@ -11,7 +11,6 @@ from ai_model import AIModel
 from image_utils import resize_image, image_to_base64
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 import bcrypt
-import math
 
 # Initialize database and AI model
 db = Database()
@@ -158,35 +157,12 @@ def review_page():
     # Get all images from the database
     images = db.get_all_images()
     
-    # Pagination
-    images_per_page = 12
-    total_pages = math.ceil(len(images) / images_per_page)
-    
-    # Initialize current_page in session state if not present
-    if 'current_page' not in st.session_state:
-        st.session_state.current_page = 1
-    
-    # Navigation buttons
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("Previous Page") and st.session_state.current_page > 1:
-            st.session_state.current_page -= 1
-    with col2:
-        st.write(f"Page {st.session_state.current_page} of {total_pages}")
-    with col3:
-        if st.button("Next Page") and st.session_state.current_page < total_pages:
-            st.session_state.current_page += 1
-    
-    # Display images in a grid
-    start_index = (st.session_state.current_page - 1) * images_per_page
-    end_index = start_index + images_per_page
-    page_images = images[start_index:end_index]
-    
     # Create a grid layout
     cols = st.columns(3)
-    for i, image in enumerate(page_images):
+    for i, image in enumerate(images):
         with cols[i % 3]:
-            st.image(base64.b64decode(image['image_data']), use_column_width=True)
+            image_container = st.empty()
+            image_container.image(base64.b64decode(image['image_data']), use_column_width=True)
             st.write(f"Current: {image['category']} - {image['subcategory']}")
             
             # Use a unique key for each set of buttons
@@ -195,28 +171,40 @@ def review_page():
             if button_key not in st.session_state:
                 st.session_state[button_key] = {"state": "main", "selected_category": None}
             
+            button_container = st.empty()
+            
             if st.session_state[button_key]["state"] == "main":
+                main_buttons = []
                 for category in ai_model.model.main_categories + ['Uncategorized']:
-                    if st.button(category, key=f"{button_key}_{category}"):
+                    main_buttons.append(button_container.button(category, key=f"{button_key}_{category}"))
+                
+                for idx, clicked in enumerate(main_buttons):
+                    if clicked:
                         st.session_state[button_key]["state"] = "sub"
-                        st.session_state[button_key]["selected_category"] = category
+                        st.session_state[button_key]["selected_category"] = ai_model.model.main_categories[idx] if idx < len(ai_model.model.main_categories) else 'Uncategorized'
                         st.rerun()
             
             elif st.session_state[button_key]["state"] == "sub":
                 selected_category = st.session_state[button_key]["selected_category"]
                 if selected_category != 'Uncategorized':
+                    sub_buttons = []
                     for subcategory in ai_model.model.subcategories[selected_category]:
-                        if st.button(subcategory, key=f"{button_key}_{subcategory}"):
+                        sub_buttons.append(button_container.button(subcategory, key=f"{button_key}_{subcategory}"))
+                    
+                    for idx, clicked in enumerate(sub_buttons):
+                        if clicked:
+                            subcategory = ai_model.model.subcategories[selected_category][idx]
                             db.update_categorization(image['id'], selected_category, subcategory)
                             ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), selected_category, subcategory)
                             st.session_state[button_key]["state"] = "main"
                             st.rerun()
                 else:
-                    db.update_categorization(image['id'], 'Uncategorized', 'Uncategorized')
-                    st.session_state[button_key]["state"] = "main"
-                    st.rerun()
+                    if button_container.button("Confirm Uncategorized", key=f"{button_key}_uncategorized"):
+                        db.update_categorization(image['id'], 'Uncategorized', 'Uncategorized')
+                        st.session_state[button_key]["state"] = "main"
+                        st.rerun()
                 
-                if st.button("Back", key=f"{button_key}_back"):
+                if button_container.button("Back", key=f"{button_key}_back"):
                     st.session_state[button_key]["state"] = "main"
                     st.rerun()
 
