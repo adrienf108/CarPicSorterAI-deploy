@@ -11,6 +11,7 @@ from ai_model import AIModel
 from image_utils import resize_image, image_to_base64
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 import bcrypt
+import math
 
 # Initialize database and AI model
 db = Database()
@@ -157,74 +158,57 @@ def review_page():
     # Get all images from the database
     images = db.get_all_images()
     
-    # Initialize current_index in session state if not present
-    if 'current_index' not in st.session_state:
-        st.session_state.current_index = 0
+    # Pagination
+    images_per_page = 12
+    total_pages = math.ceil(len(images) / images_per_page)
+    
+    # Initialize current_page in session state if not present
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = 1
     
     # Navigation buttons
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("Previous") and st.session_state.current_index > 0:
-            st.session_state.current_index -= 1
+        if st.button("Previous Page") and st.session_state.current_page > 1:
+            st.session_state.current_page -= 1
+    with col2:
+        st.write(f"Page {st.session_state.current_page} of {total_pages}")
     with col3:
-        if st.button("Next") and st.session_state.current_index < len(images) - 1:
-            st.session_state.current_index += 1
+        if st.button("Next Page") and st.session_state.current_page < total_pages:
+            st.session_state.current_page += 1
     
-    # Display current image
-    if images:
-        image = images[st.session_state.current_index]
-        st.image(base64.b64decode(image['image_data']), use_column_width=True)
-        st.write(f"Current: {image['category']} - {image['subcategory']}")
+    # Display images in a grid
+    start_index = (st.session_state.current_page - 1) * images_per_page
+    end_index = start_index + images_per_page
+    page_images = images[start_index:end_index]
+    
+    # Create a grid layout
+    cols = st.columns(3)
+    selected_images = []
+    
+    for i, image in enumerate(page_images):
+        with cols[i % 3]:
+            st.image(base64.b64decode(image['image_data']), use_column_width=True)
+            st.write(f"Current: {image['category']} - {image['subcategory']}")
+            if st.checkbox(f"Select image {i+1}"):
+                selected_images.append(image)
+    
+    # Batch categorization
+    if selected_images:
+        st.subheader("Batch Categorization")
+        main_category = st.selectbox("Select Main Category", ai_model.model.main_categories + ['Uncategorized'])
         
-        # Create buttons for main categories
-        st.write("Select Main Category:")
-        main_categories = ai_model.model.main_categories + ['Uncategorized']
-        main_category_cols = st.columns(len(main_categories))
-        selected_main_category = None
+        if main_category != 'Uncategorized':
+            subcategory = st.selectbox("Select Subcategory", ai_model.model.subcategories[main_category])
+        else:
+            subcategory = 'Uncategorized'
         
-        for i, category in enumerate(main_categories):
-            with main_category_cols[i]:
-                if st.button(category):
-                    selected_main_category = category
-        
-        # If a main category is selected, show subcategory buttons
-        if selected_main_category:
-            st.write(f"Select Subcategory for {selected_main_category}:")
-            if selected_main_category != 'Uncategorized':
-                subcategories = ai_model.model.subcategories[selected_main_category]
-                subcategory_cols = st.columns(len(subcategories))
-                for i, subcategory in enumerate(subcategories):
-                    with subcategory_cols[i]:
-                        if st.button(subcategory):
-                            # Update categorization
-                            db.update_categorization(image['id'], selected_main_category, subcategory)
-                            # Learn from manual categorization
-                            ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), selected_main_category, subcategory)
-                            st.success("Categorization updated and model updated!")
-                            # Move to next image
-                            if st.session_state.current_index < len(images) - 1:
-                                st.session_state.current_index += 1
-                            st.rerun()
-            else:
-                # For 'Uncategorized', update directly
-                db.update_categorization(image['id'], 'Uncategorized', 'Uncategorized')
-                ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), 'Uncategorized', 'Uncategorized')
-                st.success("Categorization updated to Uncategorized and model updated!")
-                # Move to next image
-                if st.session_state.current_index < len(images) - 1:
-                    st.session_state.current_index += 1
-                st.rerun()
-        
-        # Download button
-        if st.button("Download Current Image"):
-            st.download_button(
-                label="Download Image",
-                data=base64.b64decode(image['image_data']),
-                file_name=image['filename'],
-                mime="image/png"
-            )
-    else:
-        st.write("No images to review.")
+        if st.button("Update Selected Images"):
+            for image in selected_images:
+                db.update_categorization(image['id'], main_category, subcategory)
+                ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), main_category, subcategory)
+            st.success(f"Updated {len(selected_images)} images")
+            st.rerun()
 
 def statistics_page():
     st.header("AI Performance Analytics Dashboard")
