@@ -80,13 +80,13 @@ class Database:
     def get_statistics(self):
         with self.conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM images")
-            total_images = cur.fetchone()[0]
+            total_images = cur.fetchone()[0] or 0
 
             cur.execute("""
                 SELECT COUNT(*) FROM images
                 WHERE category = ai_category AND subcategory = ai_subcategory
             """)
-            correct_predictions = cur.fetchone()[0]
+            correct_predictions = cur.fetchone()[0] or 0
 
             accuracy = (correct_predictions / total_images) * 100 if total_images > 0 else 0
 
