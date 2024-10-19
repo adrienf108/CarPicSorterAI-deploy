@@ -142,53 +142,40 @@ def review_page():
     
     images = db.get_all_images()
     
-    if 'current_image_index' not in st.session_state:
-        st.session_state['current_image_index'] = 0
-
-    if st.session_state['current_image_index'] >= len(images):
-        st.success("All images have been reviewed!")
-        return
-
-    image = images[st.session_state['current_image_index']]
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.image(base64.b64decode(image['image_data']), use_column_width=True)
-    
-    with col2:
-        st.write(f"Current: {image['category']} - {image['subcategory']}")
-        
-        st.write("Select Main Category:")
-        for category in ai_model.model.main_categories:
-            if st.button(category, key=f"main_{category}"):
-                st.session_state['selected_main_category'] = category
-                st.rerun()
-        
-        if 'selected_main_category' in st.session_state:
-            st.write(f"Select Subcategory for {st.session_state['selected_main_category']}:")
-            for subcategory in ai_model.model.subcategories[st.session_state['selected_main_category']]:
-                if st.button(subcategory, key=f"sub_{subcategory}"):
-                    db.update_categorization(image['id'], st.session_state['selected_main_category'], subcategory)
-                    ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), st.session_state['selected_main_category'], subcategory)
-                    st.session_state['current_image_index'] += 1
-                    del st.session_state['selected_main_category']
+    # Create a grid layout
+    cols = st.columns(3)
+    for i, image in enumerate(images):
+        with cols[i % 3]:
+            st.image(base64.b64decode(image['image_data']), use_column_width=True)
+            st.write(f"Current: {image['category']} - {image['subcategory']}")
+            
+            # Use a unique key for each set of buttons
+            button_key = f"buttons_{image['id']}"
+            
+            if button_key not in st.session_state:
+                st.session_state[button_key] = {"state": "main", "selected_category": None}
+            
+            if st.session_state[button_key]["state"] == "main":
+                st.write("Select Main Category:")
+                for category in ai_model.model.main_categories:
+                    if st.button(category, key=f"{button_key}_{category}"):
+                        st.session_state[button_key]["state"] = "sub"
+                        st.session_state[button_key]["selected_category"] = category
+                        st.rerun()
+            
+            elif st.session_state[button_key]["state"] == "sub":
+                selected_category = st.session_state[button_key]["selected_category"]
+                st.write(f"Select Subcategory for {selected_category}:")
+                for subcategory in ai_model.model.subcategories[selected_category]:
+                    if st.button(subcategory, key=f"{button_key}_{subcategory}"):
+                        db.update_categorization(image['id'], selected_category, subcategory)
+                        ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), selected_category, subcategory)
+                        st.session_state[button_key]["state"] = "main"
+                        st.rerun()
+                
+                if st.button("Back", key=f"{button_key}_back"):
+                    st.session_state[button_key]["state"] = "main"
                     st.rerun()
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("Previous Image") and st.session_state['current_image_index'] > 0:
-            st.session_state['current_image_index'] -= 1
-            if 'selected_main_category' in st.session_state:
-                del st.session_state['selected_main_category']
-            st.rerun()
-    
-    with col3:
-        if st.button("Next Image") and st.session_state['current_image_index'] < len(images) - 1:
-            st.session_state['current_image_index'] += 1
-            if 'selected_main_category' in st.session_state:
-                del st.session_state['selected_main_category']
-            st.rerun()
 
 def statistics_page():
     st.header("AI Performance Analytics Dashboard")
