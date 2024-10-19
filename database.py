@@ -144,3 +144,11 @@ class Database:
     def is_admin(self, user_id):
         user = self.get_user(user_id)
         return user and user['role'] == 'admin'
+
+    def promote_to_admin(self, username):
+        with self.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE users SET role = 'admin' WHERE username = %s RETURNING id", (username,))
+                result = cur.fetchone()
+            conn.commit()
+        return result is not None

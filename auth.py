@@ -54,3 +54,8 @@ def admin_required(func):
             st.stop()
         return func(*args, **kwargs)
     return wrapper
+
+def promote_user_to_admin(username, current_user_id):
+    if not db.is_admin(current_user_id):
+        return False
+    return db.promote_to_admin(username)

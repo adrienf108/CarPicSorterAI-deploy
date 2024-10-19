@@ -6,7 +6,7 @@ import base64
 from database import Database
 from ai_model import AIModel
 from image_utils import resize_image, image_to_base64
-from auth import init_auth, register_user, create_admin_user, authenticate_user, logout, get_current_user_role, login_required, admin_required
+from auth import init_auth, register_user, create_admin_user, authenticate_user, logout, get_current_user_role, login_required, admin_required, promote_user_to_admin
 
 # Initialize database and AI model
 db = Database()
@@ -29,9 +29,7 @@ def main():
     else:
         st.sidebar.write("Not logged in")
         
-    pages = ["Login", "Register", "Upload", "Review", "Statistics"]
-    if st.session_state.user and st.session_state.user['role'] == 'admin':
-        pages.append("Create Admin")
+    pages = ["Login", "Register", "Upload", "Review", "Statistics", "Admin"]
     
     page = st.sidebar.selectbox("Choose a page", pages)
 
@@ -45,8 +43,8 @@ def main():
         review_page()
     elif page == "Statistics":
         statistics_page()
-    elif page == "Create Admin":
-        admin_create_page()
+    elif page == "Admin":
+        admin_page()
 
 def login_page():
     st.header("Login")
@@ -147,6 +145,16 @@ def statistics_page():
     st.subheader("Category Distribution")
     category_df = pd.DataFrame(stats['category_distribution'])
     st.bar_chart(category_df.set_index('category'))
+
+@admin_required
+def admin_page():
+    st.header("Admin Actions")
+    username_to_promote = st.text_input("Username to promote to admin")
+    if st.button("Promote to Admin"):
+        if promote_user_to_admin(username_to_promote, st.session_state.user['id']):
+            st.success(f"User {username_to_promote} has been promoted to admin.")
+        else:
+            st.error("Failed to promote user to admin. Make sure the username exists and you have admin privileges.")
 
 if __name__ == "__main__":
     main()
