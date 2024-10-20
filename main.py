@@ -10,6 +10,7 @@ from database import Database
 from ai_model import AIModel
 from image_utils import resize_image, image_to_base64
 import bcrypt
+import hashlib
 
 # Initialize database and AI model
 db = Database()
@@ -20,6 +21,10 @@ class User:
         self.id = id
         self.username = username
         self.role = role
+
+def calculate_image_hash(image):
+    """Calculate a hash for the image to detect duplicates."""
+    return hashlib.md5(image.tobytes()).hexdigest()
 
 def main():
     st.set_page_config(page_title="AI-powered Car Image Categorization", layout="wide")
@@ -86,6 +91,9 @@ def upload_page():
 
     if uploaded_files:
         all_images = []
+        image_hashes = set()
+        duplicates_count = 0
+
         for uploaded_file in uploaded_files:
             if uploaded_file.type == "application/zip":
                 with zipfile.ZipFile(uploaded_file) as z:
@@ -95,11 +103,22 @@ def upload_page():
                                 try:
                                     img_data = file.read()
                                     img = Image.open(io.BytesIO(img_data))
-                                    all_images.append((filename, img))
+                                    img_hash = calculate_image_hash(img)
+                                    if img_hash not in image_hashes:
+                                        image_hashes.add(img_hash)
+                                        all_images.append((filename, img))
+                                    else:
+                                        duplicates_count += 1
                                 except Exception as e:
                                     st.warning(f"Skipped file {filename}: {str(e)}")
             else:
-                all_images.append((uploaded_file.name, Image.open(uploaded_file)))
+                img = Image.open(uploaded_file)
+                img_hash = calculate_image_hash(img)
+                if img_hash not in image_hashes:
+                    image_hashes.add(img_hash)
+                    all_images.append((uploaded_file.name, img))
+                else:
+                    duplicates_count += 1
 
         total_files = len(all_images)
         progress_bar = st.progress(0)
@@ -127,6 +146,8 @@ def upload_page():
             status_text.text(f"Processed {i+1}/{total_files} images")
 
         st.success(f"Successfully uploaded and processed {total_files} images!")
+        if duplicates_count > 0:
+            st.info(f"Skipped {duplicates_count} duplicate image(s).")
 
 def review_page():
     st.header("Review and Correct Categorizations")
