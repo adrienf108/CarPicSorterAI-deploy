@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
-from tensorflow.keras.models import Model
+from tensorflow.keras.models import Model, Sequential
 
 class CustomModel:
     def __init__(self):
@@ -22,15 +22,23 @@ class CustomModel:
         self.model = self._create_model()
     
     def _create_model(self):
-        # Use MobileNetV2 as the base model
-        base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
-        
-        # Add custom layers
-        x = GlobalAveragePooling2D()(base_model.output)
-        main_output = Dense(len(self.main_categories), activation='softmax', name='main_category')(x)
-        subcategory_output = Dense(max(len(subcats) for subcats in self.subcategories.values()), activation='softmax', name='subcategory')(x)
-        
-        model = Model(inputs=base_model.input, outputs=[main_output, subcategory_output])
+        try:
+            # Attempt to create MobileNetV2 base model
+            base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+            x = GlobalAveragePooling2D()(base_model.output)
+            main_output = Dense(len(self.main_categories), activation='softmax', name='main_category')(x)
+            subcategory_output = Dense(max(len(subcats) for subcats in self.subcategories.values()), activation='softmax', name='subcategory')(x)
+            model = Model(inputs=base_model.input, outputs=[main_output, subcategory_output])
+        except Exception as e:
+            print(f"Error creating MobileNetV2 model: {e}")
+            print("Falling back to a simple Sequential model")
+            # Create a simple Sequential model as a fallback
+            model = Sequential([
+                Dense(64, activation='relu', input_shape=(224, 224, 3)),
+                GlobalAveragePooling2D(),
+                Dense(len(self.main_categories), activation='softmax', name='main_category'),
+                Dense(max(len(subcats) for subcats in self.subcategories.values()), activation='softmax', name='subcategory')
+            ])
         
         # Compile the model
         model.compile(optimizer='adam',
