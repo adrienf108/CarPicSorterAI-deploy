@@ -8,7 +8,7 @@ import base64
 import zipfile
 from database import Database
 from ai_model import AIModel
-from image_utils import resize_image, image_to_base64
+from image_utils import image_to_base64
 import bcrypt
 import hashlib
 
@@ -131,10 +131,14 @@ def upload_page():
 
             main_category, subcategory, confidence = ai_model.predict(image)
 
-            display_image = resize_image(image, size=(300, 300))
-            image_data = image_to_base64(display_image)
+            # Save the original image without resizing
+            image_data = image_to_base64(image)
 
             db.save_image(filename, image_data, main_category, subcategory, st.session_state['user'].id, float(confidence))
+
+            # Display a resized version of the image in the UI
+            display_image = image.copy()
+            display_image.thumbnail((300, 300))
 
             if main_category == 'Uncategorized':
                 st.image(display_image, caption=f"{filename}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
