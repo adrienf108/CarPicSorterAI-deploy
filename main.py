@@ -149,9 +149,10 @@ def upload_page():
             progress_bar.progress(process_progress)
             status_text.text(f"Processed {i+1}/{total_files} images")
 
-        st.success(f"Successfully uploaded and processed {total_files} images!")
         if duplicates_count > 0:
-            st.info(f"Skipped {duplicates_count} duplicate image(s).")
+            st.info(f'Skipped {duplicates_count} duplicate image(s).')
+
+        st.success(f"Successfully uploaded and processed {total_files} images!")
 
 def review_page():
     st.header("Review and Correct Categorizations")
