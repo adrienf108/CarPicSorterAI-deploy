@@ -255,6 +255,10 @@ def statistics_page():
     
     stats = db.get_statistics()
     
+    if stats['total_images'] == 0:
+        st.warning("No statistics available. Upload and process some images to see analytics.")
+        return
+    
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Total Images", stats['total_images'])
@@ -263,43 +267,58 @@ def statistics_page():
     with col3:
         st.metric("Unique Categories", len(stats['category_distribution']))
     
-    st.subheader("Category Distribution")
-    category_df = pd.DataFrame(stats['category_distribution'])
-    fig = px.pie(category_df, values='count', names='category', title='Category Distribution')
-    st.plotly_chart(fig)
+    if stats['category_distribution']:
+        st.subheader("Category Distribution")
+        category_df = pd.DataFrame(stats['category_distribution'])
+        fig = px.pie(category_df, values='count', names='category', title='Category Distribution')
+        st.plotly_chart(fig)
+    else:
+        st.info("No category distribution data available yet.")
     
-    st.subheader("Accuracy Over Time")
-    accuracy_df = pd.DataFrame(stats['accuracy_over_time'])
-    fig = px.line(accuracy_df, x='date', y='accuracy', title='AI Model Accuracy Over Time')
-    st.plotly_chart(fig)
+    if stats['accuracy_over_time']:
+        st.subheader("Accuracy Over Time")
+        accuracy_df = pd.DataFrame(stats['accuracy_over_time'])
+        fig = px.line(accuracy_df, x='date', y='accuracy', title='AI Model Accuracy Over Time')
+        st.plotly_chart(fig)
+    else:
+        st.info("No accuracy over time data available yet.")
     
-    st.subheader("Confusion Matrix")
-    confusion_matrix = np.array(stats['confusion_matrix'])
-    categories = stats['confusion_categories']
+    if stats['confusion_matrix'] and stats['confusion_categories']:
+        st.subheader("Confusion Matrix")
+        confusion_matrix = np.array(stats['confusion_matrix'])
+        categories = stats['confusion_categories']
+        
+        fig = go.Figure(data=go.Heatmap(
+            z=confusion_matrix,
+            x=categories,
+            y=categories,
+            hoverongaps=False,
+            colorscale='Viridis'
+        ))
+        fig.update_layout(
+            title='Confusion Matrix',
+            xaxis_title='Predicted Category',
+            yaxis_title='True Category'
+        )
+        st.plotly_chart(fig)
+    else:
+        st.info("No confusion matrix data available yet.")
     
-    fig = go.Figure(data=go.Heatmap(
-        z=confusion_matrix,
-        x=categories,
-        y=categories,
-        hoverongaps=False,
-        colorscale='Viridis'
-    ))
-    fig.update_layout(
-        title='Confusion Matrix',
-        xaxis_title='Predicted Category',
-        yaxis_title='True Category'
-    )
-    st.plotly_chart(fig)
+    if stats['top_misclassifications']:
+        st.subheader("Top Misclassifications")
+        misclassifications = stats['top_misclassifications']
+        misclass_df = pd.DataFrame(misclassifications)
+        st.table(misclass_df)
+    else:
+        st.info("No misclassification data available yet.")
     
-    st.subheader("Top Misclassifications")
-    misclassifications = stats['top_misclassifications']
-    misclass_df = pd.DataFrame(misclassifications)
-    st.table(misclass_df)
-    
-    st.subheader("Confidence Distribution")
-    confidence_df = pd.DataFrame(stats['confidence_distribution'])
-    fig = px.histogram(confidence_df, x='confidence', nbins=20, title='Distribution of AI Confidence Scores')
-    st.plotly_chart(fig)
+    if stats['confidence_distribution']:
+        st.subheader("Confidence Distribution")
+        confidence_df = pd.DataFrame(stats['confidence_distribution'])
+        fig = px.histogram(confidence_df, x='confidence', nbins=20, title='Distribution of AI Confidence Scores')
+        st.plotly_chart(fig)
+    else:
+        st.info("No confidence distribution data available yet.")
 
 def user_management_page():
     st.header("User Management")
