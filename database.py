@@ -3,6 +3,7 @@ import os
 import bcrypt
 import pandas as pd
 from datetime import datetime, timedelta
+import numpy as np
 
 class Database:
     def __init__(self):
@@ -83,11 +84,9 @@ class Database:
 
     def get_statistics(self):
         with self.conn.cursor() as cur:
-            # Total images
             cur.execute("SELECT COUNT(*) FROM images")
             total_images = cur.fetchone()[0]
 
-            # Overall accuracy
             cur.execute("""
                 SELECT COUNT(*) FROM images
                 WHERE category = ai_category AND subcategory = ai_subcategory
@@ -95,7 +94,6 @@ class Database:
             correct_predictions = cur.fetchone()[0]
             accuracy = (correct_predictions / total_images) * 100 if total_images > 0 else 0
 
-            # Category distribution
             cur.execute("""
                 SELECT category, COUNT(*) as count
                 FROM images
@@ -104,7 +102,6 @@ class Database:
             """)
             category_distribution = [{'category': row[0], 'count': row[1]} for row in cur.fetchall()]
 
-            # Accuracy over time
             cur.execute("""
                 SELECT DATE(created_at) as date,
                        AVG(CASE WHEN category = ai_category AND subcategory = ai_subcategory THEN 1 ELSE 0 END) * 100 as accuracy
@@ -114,18 +111,21 @@ class Database:
             """)
             accuracy_over_time = [{'date': row[0], 'accuracy': row[1]} for row in cur.fetchall()]
 
-            # Confusion matrix
             cur.execute("""
                 SELECT ai_category, category, COUNT(*)
                 FROM images
                 GROUP BY ai_category, category
             """)
-            confusion_matrix = pd.pivot_table(
-                pd.DataFrame(cur.fetchall(), columns=['ai_category', 'category', 'count']),
-                values='count', index='category', columns='ai_category', fill_value=0
-            ).to_dict('split')
+            confusion_data = cur.fetchall()
+            categories = sorted(set(row[0] for row in confusion_data) | set(row[1] for row in confusion_data))
+            confusion_matrix = np.zeros((len(categories), len(categories)), dtype=int)
+            category_to_index = {cat: i for i, cat in enumerate(categories)}
+            
+            for ai_cat, true_cat, count in confusion_data:
+                i = category_to_index[true_cat]
+                j = category_to_index[ai_cat]
+                confusion_matrix[i, j] = count
 
-            # Top misclassifications
             cur.execute("""
                 SELECT ai_category, category, COUNT(*) as count
                 FROM images
@@ -139,7 +139,6 @@ class Database:
                 for row in cur.fetchall()
             ]
 
-            # Confidence distribution
             cur.execute("""
                 SELECT ai_confidence
                 FROM images
@@ -151,7 +150,8 @@ class Database:
             'accuracy': accuracy,
             'category_distribution': category_distribution,
             'accuracy_over_time': accuracy_over_time,
-            'confusion_matrix': confusion_matrix,
+            'confusion_matrix': confusion_matrix.tolist(),
+            'confusion_categories': categories,
             'top_misclassifications': top_misclassifications,
             'confidence_distribution': confidence_distribution
         }

@@ -2,6 +2,7 @@ import streamlit as st
 from streamlit.runtime.scriptrunner import RerunException
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from PIL import Image
 import io
 import base64
@@ -11,6 +12,7 @@ from ai_model import AIModel
 from image_utils import image_to_base64
 import bcrypt
 import hashlib
+import numpy as np
 
 # Initialize database and AI model
 db = Database()
@@ -262,12 +264,21 @@ def statistics_page():
     st.plotly_chart(fig)
     
     st.subheader("Confusion Matrix")
-    confusion_matrix = stats['confusion_matrix']
-    fig = px.imshow(confusion_matrix, 
-                    labels=dict(x="Predicted Category", y="True Category", color="Count"),
-                    x=ai_model.model.main_categories,
-                    y=ai_model.model.main_categories)
-    fig.update_layout(title='Confusion Matrix')
+    confusion_matrix = np.array(stats['confusion_matrix'])
+    categories = stats['confusion_categories']
+    
+    fig = go.Figure(data=go.Heatmap(
+        z=confusion_matrix,
+        x=categories,
+        y=categories,
+        hoverongaps=False,
+        colorscale='Viridis'
+    ))
+    fig.update_layout(
+        title='Confusion Matrix',
+        xaxis_title='Predicted Category',
+        yaxis_title='True Category'
+    )
     st.plotly_chart(fig)
     
     st.subheader("Top Misclassifications")
