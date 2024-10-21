@@ -240,8 +240,18 @@ def review_page():
             st.session_state['review_page_number'] = min(n_pages - 1, page_number + 1)
             st.rerun()
 
+def reset_statistics():
+    """Reset all statistics in the database."""
+    db.reset_all_tables()
+    st.success("Statistics have been reset successfully!")
+    st.rerun()
+
 def statistics_page():
     st.header("AI Performance Analytics Dashboard")
+    
+    # Add reset button
+    if st.button("Reset Statistics"):
+        reset_statistics()
     
     stats = db.get_statistics()
     
