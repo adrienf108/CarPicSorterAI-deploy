@@ -88,12 +88,11 @@ def login_page():
 def upload_page():
     st.header("Upload Car Images")
     
-    # Initialize duplicates_count in session state if it doesn't exist
-    if 'duplicates_count' not in st.session_state:
-        st.session_state['duplicates_count'] = 0
+    # Reset duplicates_count at the beginning of the function
+    st.session_state['duplicates_count'] = 0
     
     # Display warning message if there were duplicate images skipped in the previous upload
-    if st.session_state['duplicates_count'] > 0:
+    if 'duplicates_count' in st.session_state and st.session_state['duplicates_count'] > 0:
         st.warning(f"Skipped {st.session_state['duplicates_count']} duplicate image(s) in the previous upload.")
     
     uploaded_files = st.file_uploader("Choose images or zip files to upload", type=["jpg", "jpeg", "png", "zip"], accept_multiple_files=True)
