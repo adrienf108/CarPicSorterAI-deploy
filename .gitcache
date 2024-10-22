@@ -1,0 +1,19 @@
+# Ignore Python bytecode files
+__pycache__/
+*.pyc
+
+# Ignore environment-specific files
+.env
+
+# Ignore Streamlit cache
+.streamlit/
+
+# Ignore any log files
+*.log
+
+# Ignore database files
+*.db
+
+# Ignore system files
+.DS_Store
+Thumbs.db
