@@ -19,6 +19,10 @@ args = "Start Streamlit App"
 task = "workflow.run"
 args = "Test CPU Model"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Streamlit App"
+
 [[workflows.workflow]]
 name = "Start Streamlit App"
 author = "agent"
@@ -41,6 +45,18 @@ agentRequireRestartOnSave = false
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "python test_cpu_model.py"
+
+[[workflows.workflow]]
+name = "Streamlit App"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "streamlit run main.py --server.port 5000"
+waitForPort = 5000
 
 [deployment]
 run = ["sh", "-c", "streamlit run main.py --server.port 5000"]
