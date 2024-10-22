@@ -30,21 +30,6 @@ def calculate_image_hash(image):
 
 def main():
     st.set_page_config(page_title="AI-powered Car Image Categorization", layout="wide")
-    
-    # Hide Streamlit running indicator and other unnecessary UI elements
-    hide_streamlit_style = """
-        <style>
-        #MainMenu {visibility: hidden;}
-        footer {visibility: hidden;}
-        .stDeployButton {display:none;}
-        .stToolbar {display:none;}
-        .stStatusWidget {display:none;}
-        #stStatusWidget {display:none;}
-        div[data-testid="stStatusWidget"] {display:none;}
-        </style>
-    """
-    st.markdown(hide_streamlit_style, unsafe_allow_html=True)
-    
     st.title("AI-powered Car Image Categorization")
 
     # Check if user is logged in
