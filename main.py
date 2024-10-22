@@ -3,10 +3,14 @@ import streamlit as st
 from database import Database
 from ai_model import AIModel
 import bcrypt
+from PIL import Image
+import io
+import zipfile
+from image_utils import resize_image, image_to_base64
 
 # Limit the number of threads used by Streamlit
 os.environ['STREAMLIT_SERVER_NUM_WORKERS'] = '1'
-os.environ['STREAMLIT_SERVER_MAX_UPLOAD_SIZE'] = '5'
+os.environ['STREAMLIT_SERVER_MAX_UPLOAD_SIZE'] = '1000'
 
 # Initialize database and AI model
 db = Database()
@@ -79,7 +83,36 @@ def login_page():
 
 def upload_page():
     st.header("Upload Car Images")
-    st.warning("Image upload functionality is currently disabled to reduce resource usage.")
+    
+    uploaded_files = st.file_uploader("Choose image files", accept_multiple_files=True, type=['png', 'jpg', 'jpeg'])
+    
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            process_uploaded_file(uploaded_file)
+
+def process_uploaded_file(uploaded_file):
+    try:
+        # Open the image using PIL
+        image = Image.open(uploaded_file)
+        
+        # Resize the image
+        resized_image = resize_image(image)
+        
+        # Convert the image to base64
+        image_data = image_to_base64(resized_image)
+        
+        # Get AI prediction
+        main_category, subcategory, confidence = ai_model.predict(resized_image)
+        
+        # Save image to database
+        db.save_image(uploaded_file.name, image_data, main_category, subcategory, st.session_state['user'].id, confidence)
+        
+        st.success(f"Uploaded and processed: {uploaded_file.name}")
+        st.write(f"Predicted category: {main_category} - {subcategory}")
+        st.write(f"Confidence: {confidence:.2f}")
+        
+    except Exception as e:
+        st.error(f"Error processing {uploaded_file.name}: {str(e)}")
 
 def review_page():
     st.header("Review and Correct Categorizations")
