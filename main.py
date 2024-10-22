@@ -18,26 +18,6 @@ import numpy as np
 db = Database()
 ai_model = AIModel()
 
-# Custom CSS for Streamlit spinner
-st.markdown('''
-    <style>
-    div.stSpinner > div > div {
-        border-top-color: #3498db !important;
-        border-left-color: #3498db !important;
-        width: 40px !important;
-        height: 40px !important;
-    }
-    div.stSpinner > div > div:before {
-        content: '🚗';
-        font-size: 20px;
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-    }
-    </style>
-''', unsafe_allow_html=True)
-
 class User:
     def __init__(self, id, username, role):
         self.id = id
@@ -50,7 +30,6 @@ def calculate_image_hash(image):
 
 def main():
     st.set_page_config(page_title="AI-powered Car Image Categorization", layout="wide")
-    
     st.title("AI-powered Car Image Categorization")
 
     # Check if user is logged in
