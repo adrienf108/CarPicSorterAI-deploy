@@ -18,6 +18,26 @@ import numpy as np
 db = Database()
 ai_model = AIModel()
 
+# Custom CSS for Streamlit spinner
+st.markdown('''
+    <style>
+    div.stSpinner > div > div {
+        border-top-color: #3498db !important;
+        border-left-color: #3498db !important;
+        width: 40px !important;
+        height: 40px !important;
+    }
+    div.stSpinner > div > div:before {
+        content: '🚗';
+        font-size: 20px;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+    }
+    </style>
+''', unsafe_allow_html=True)
+
 class User:
     def __init__(self, id, username, role):
         self.id = id
@@ -31,59 +51,6 @@ def calculate_image_hash(image):
 def main():
     st.set_page_config(page_title="AI-powered Car Image Categorization", layout="wide")
     
-    # Custom CSS for car-shaped loading animation
-    st.markdown("""
-    <style>
-    .car-loader {
-      width: 100px;
-      height: 50px;
-      background-color: #3498db;
-      position: relative;
-      border-radius: 10px;
-      animation: car-move 2s infinite;
-    }
-    .car-loader:before {
-      content: '';
-      position: absolute;
-      top: 50px;
-      left: 10px;
-      width: 30px;
-      height: 30px;
-      background-color: #2c3e50;
-      border-radius: 50%;
-      animation: wheel-spin 1s infinite linear;
-    }
-    .car-loader:after {
-      content: '';
-      position: absolute;
-      top: 50px;
-      right: 10px;
-      width: 30px;
-      height: 30px;
-      background-color: #2c3e50;
-      border-radius: 50%;
-      animation: wheel-spin 1s infinite linear;
-    }
-    @keyframes car-move {
-      0% { transform: translateX(-50px); }
-      50% { transform: translateX(50px); }
-      100% { transform: translateX(-50px); }
-    }
-    @keyframes wheel-spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-    # Display custom loading animation
-    with st.spinner("Loading..."):
-        st.markdown('<div class="car-loader"></div>', unsafe_allow_html=True)
-        
-        # Simulating some loading time
-        import time
-        time.sleep(2)
-
     st.title("AI-powered Car Image Categorization")
 
     # Check if user is logged in
