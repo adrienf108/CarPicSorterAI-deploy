@@ -1,11 +1,8 @@
-import tensorflow as tf
-from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
-from tensorflow.keras.models import Model, Sequential
+import numpy as np
+from PIL import Image
 
 class CustomModel:
     def __init__(self):
-        # Define the main categories and subcategories
         self.main_categories = ['Exterior', 'Interior', 'Engine', 'Undercarriage', 'Documents']
         self.subcategories = {
             'Exterior': ['3/4 front view', 'Side profile', '3/4 rear view', 'Rear view', 'Wheels', 'Details', 'Defects'],
@@ -14,69 +11,26 @@ class CustomModel:
             'Undercarriage': ['Undercarriage'],
             'Documents': ['Invoices/Receipts', 'Service book', 'Technical inspections/MOT certificates']
         }
-        
-        # Set confidence threshold
         self.confidence_threshold = 0.7
-        
-        # Create the model
-        self.model = self._create_model()
-    
-    def _create_model(self):
-        try:
-            # Attempt to create MobileNetV2 base model
-            base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
-            x = GlobalAveragePooling2D()(base_model.output)
-            main_output = Dense(len(self.main_categories), activation='softmax', name='main_category')(x)
-            subcategory_output = Dense(max(len(subcats) for subcats in self.subcategories.values()), activation='softmax', name='subcategory')(x)
-            model = Model(inputs=base_model.input, outputs=[main_output, subcategory_output])
-        except Exception as e:
-            print(f"Error creating MobileNetV2 model: {e}")
-            print("Falling back to a simple Sequential model")
-            # Create a simple Sequential model as a fallback
-            model = Sequential([
-                Dense(64, activation='relu', input_shape=(224, 224, 3)),
-                GlobalAveragePooling2D(),
-                Dense(len(self.main_categories), activation='softmax', name='main_category'),
-                Dense(max(len(subcats) for subcats in self.subcategories.values()), activation='softmax', name='subcategory')
-            ])
-        
-        # Compile the model
-        model.compile(optimizer='adam',
-                      loss={'main_category': 'categorical_crossentropy', 'subcategory': 'categorical_crossentropy'},
-                      loss_weights={'main_category': 1.0, 'subcategory': 1.0},
-                      metrics=['accuracy'])
-        
-        return model
-    
+
     def predict(self, preprocessed_image):
-        # Make predictions
-        main_pred, subcategory_pred = self.model.predict(preprocessed_image)
+        # Simulate a prediction by returning a random category and subcategory
+        main_category = np.random.choice(self.main_categories)
+        subcategory = np.random.choice(self.subcategories[main_category])
+        confidence = np.random.uniform(0.5, 1.0)
         
-        # Get the main category and its confidence
-        main_category_index = tf.argmax(main_pred[0]).numpy()
-        main_category_confidence = tf.reduce_max(main_pred[0]).numpy()
+        if confidence < self.confidence_threshold:
+            return 'Uncategorized', 'Uncategorized', confidence
         
-        if main_category_confidence < self.confidence_threshold:
-            return 'Uncategorized', 'Uncategorized', main_category_confidence
-        
-        main_category = self.main_categories[main_category_index]
-        
-        # Get the subcategory
-        subcategory_index = tf.argmax(subcategory_pred[0]).numpy()
-        subcategory = self.subcategories[main_category][subcategory_index % len(self.subcategories[main_category])]
-        
-        return main_category, subcategory, main_category_confidence
+        return main_category, subcategory, confidence
 
     def preprocess_image(self, image):
         # Resize the image to 224x224
-        image = tf.image.resize(image, (224, 224))
-        # Normalize the image
-        image = image / 255.0
-        # Add batch dimension
-        image = tf.expand_dims(image, 0)
-        return image
+        image = image.resize((224, 224))
+        # Convert to numpy array and normalize
+        image_array = np.array(image) / 255.0
+        return image_array
 
     def learn_from_manual_categorization(self, image, main_category, subcategory):
-        # This is a placeholder for future implementation of learning from manual categorizations
-        # In a real-world scenario, you would update the model based on this new information
+        # Placeholder for future implementation
         pass

@@ -1,13 +1,12 @@
 from custom_model import CustomModel
 from PIL import Image
-import numpy as np
 
 class AIModel:
     def __init__(self):
         self.model = CustomModel()
 
     def predict(self, image):
-        # image is now a PIL Image object
+        # image is a PIL Image object
         preprocessed_image = self.preprocess_image(image)
         
         # Get predictions
@@ -16,10 +15,8 @@ class AIModel:
         return main_category, subcategory, float(confidence)
 
     def preprocess_image(self, image):
-        # image is now a PIL Image object
-        img_array = np.array(image)
         # Use the CustomModel's preprocess_image method
-        return self.model.preprocess_image(img_array)
+        return self.model.preprocess_image(image)
 
     def learn_from_manual_categorization(self, image, main_category, subcategory):
         # Pass the learning task to the CustomModel
