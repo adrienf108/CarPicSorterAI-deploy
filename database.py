@@ -60,7 +60,10 @@ class Database:
 
     def get_all_images(self):
         with self.conn.cursor() as cur:
-            cur.execute("SELECT id, filename, image_data, category, subcategory, user_id FROM images")
+            cur.execute("""
+                SELECT id, filename, image_data, category, subcategory, ai_category, ai_subcategory, ai_confidence, user_id 
+                FROM images
+            """)
             return [
                 {
                     'id': row[0],
@@ -68,7 +71,10 @@ class Database:
                     'image_data': row[2],
                     'category': row[3],
                     'subcategory': row[4],
-                    'user_id': row[5]
+                    'ai_category': row[5],
+                    'ai_subcategory': row[6],
+                    'ai_confidence': row[7],
+                    'user_id': row[8]
                 }
                 for row in cur.fetchall()
             ]

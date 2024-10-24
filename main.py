@@ -139,21 +139,22 @@ def upload_page():
             progress_bar.progress(upload_progress)
             status_text.text(f"Uploading and processing {i+1}/{total_files} images")
 
-            main_category, subcategory, confidence = ai_model.predict(image)
+            ai_category, ai_subcategory, confidence = ai_model.predict(image)
 
             # Save the original image without resizing
             image_data = image_to_base64(image)
 
-            db.save_image(filename, image_data, main_category, subcategory, st.session_state['user'].id, float(confidence))
+            # Store both AI predictions and initial categorization
+            db.save_image(filename, image_data, ai_category, ai_subcategory, st.session_state['user'].id, float(confidence))
 
             # Display a resized version of the image in the UI
             display_image = image.copy()
             display_image.thumbnail((300, 300))
 
-            if main_category == 'Uncategorized':
+            if ai_category == 'Uncategorized':
                 st.image(display_image, caption=f"{filename}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
             else:
-                st.image(display_image, caption=f"{filename}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
+                st.image(display_image, caption=f"{filename}: {ai_category} - {ai_subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
 
             process_progress = (i + 1) / total_files
             progress_bar.progress(process_progress)
@@ -193,6 +194,9 @@ def review_page():
     for i, image in enumerate(page_images):
         with cols[i % 3]:
             st.image(base64.b64decode(image['image_data']), use_column_width=True)
+            
+            # Display both AI prediction and current categorization
+            st.write(f"AI Prediction: {image['ai_category']} - {image['ai_subcategory']} (Confidence: {image['ai_confidence']:.2f})")
             st.write(f"Current: {image['category']} - {image['subcategory']}")
             
             # Use a unique key for each set of buttons
