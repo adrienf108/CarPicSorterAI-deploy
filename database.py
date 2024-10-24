@@ -63,6 +63,68 @@ class Database:
             ''')
         self.conn.commit()
 
+    def reset_all_tables(self):
+        with self.conn.cursor() as cur:
+            cur.execute("DROP TABLE IF EXISTS token_usage")
+            cur.execute("DROP TABLE IF EXISTS images")
+            cur.execute("DROP TABLE IF EXISTS users")
+        self.conn.commit()
+        self.create_tables()
+
+    def save_image(self, filename, image_data, category, subcategory, user_id, ai_confidence: float, token_usage: int = 0, image_size: int = 0):
+        with self.conn.cursor() as cur:
+            logger.info(f"Saving image {filename} with category: {category} - {subcategory}")
+            cur.execute('''
+                INSERT INTO images (
+                    filename, image_data, category, subcategory, 
+                    ai_category, ai_subcategory, ai_confidence, 
+                    user_id, token_usage, image_size
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (filename, image_data, category, subcategory, 
+                  category, subcategory, ai_confidence, user_id, 
+                  token_usage, image_size))
+            
+            # Update token usage statistics
+            today = datetime.now().date()
+            cur.execute("""
+                INSERT INTO token_usage (date, total_tokens, total_images, total_size)
+                VALUES (%s, %s, 1, %s)
+                ON CONFLICT (date)
+                DO UPDATE SET 
+                    total_tokens = token_usage.total_tokens + %s,
+                    total_images = token_usage.total_images + 1,
+                    total_size = token_usage.total_size + %s
+            """, (today, token_usage, image_size, token_usage, image_size))
+        self.conn.commit()
+
+    def get_all_images(self):
+        with self.conn.cursor() as cur:
+            cur.execute('''
+                SELECT id, filename, image_data, category, subcategory, user_id
+                FROM images
+                ORDER BY created_at DESC
+            ''')
+            results = cur.fetchall()
+            logger.info(f"Retrieved {len(results)} images from database")
+            return [{
+                'id': row[0],
+                'filename': row[1],
+                'image_data': row[2],
+                'category': row[3],
+                'subcategory': row[4],
+                'user_id': row[5]
+            } for row in results]
+
+    def update_categorization(self, image_id, new_category, new_subcategory):
+        with self.conn.cursor() as cur:
+            logger.info(f"Updating image {image_id} with new categories: {new_category} - {new_subcategory}")
+            cur.execute("""
+                UPDATE images
+                SET category = %s, subcategory = %s
+                WHERE id = %s
+            """, (new_category, new_subcategory, image_id))
+        self.conn.commit()
+
     def get_token_usage_stats(self):
         with self.conn.cursor() as cur:
             # Get total token usage
@@ -103,111 +165,117 @@ class Database:
             }
 
     def get_statistics(self):
-        try:
-            with self.conn.cursor() as cur:
-                # Get total images count
-                cur.execute("SELECT COUNT(*) FROM images")
-                result = cur.fetchone()
-                total_images = result[0] if result else 0
-                logger.info(f"Total images count: {total_images}")
+        with self.conn.cursor() as cur:
+            # Get total images count
+            cur.execute("SELECT COUNT(*) FROM images")
+            result = cur.fetchone()
+            total_images = result[0] if result else 0
 
-                # Get correct predictions count
-                cur.execute("""
-                    SELECT COUNT(*) FROM images
-                    WHERE category = ai_category AND subcategory = ai_subcategory
-                """)
-                result = cur.fetchone()
-                correct_predictions = result[0] if result else 0
-                accuracy = (correct_predictions / total_images * 100) if total_images > 0 else 0
-                logger.info(f"Accuracy: {accuracy:.2f}%")
+            # Get correct predictions count
+            cur.execute("""
+                SELECT COUNT(*) FROM images
+                WHERE category = ai_category AND subcategory = ai_subcategory
+            """)
+            result = cur.fetchone()
+            correct_predictions = result[0] if result else 0
+            accuracy = (correct_predictions / total_images * 100) if total_images > 0 else 0
 
-                # Get category distribution
-                cur.execute("""
-                    SELECT category, COUNT(*) as count
-                    FROM images
-                    GROUP BY category
-                    ORDER BY count DESC
-                """)
-                category_distribution = [{'category': row[0], 'count': row[1]} for row in cur.fetchall()]
-                logger.info(f"Retrieved category distribution for {len(category_distribution)} categories")
+            # Get category distribution
+            cur.execute("""
+                SELECT category, COUNT(*) as count
+                FROM images
+                GROUP BY category
+                ORDER BY count DESC
+            """)
+            category_distribution = [{'category': row[0], 'count': row[1]} for row in cur.fetchall()]
 
-                # Get accuracy over time
-                cur.execute("""
-                    SELECT DATE(created_at) as date,
-                           AVG(CASE WHEN category = ai_category AND subcategory = ai_subcategory THEN 1 ELSE 0 END) * 100 as accuracy
-                    FROM images
-                    GROUP BY DATE(created_at)
-                    ORDER BY date
-                """)
-                accuracy_over_time = [{'date': row[0], 'accuracy': row[1]} for row in cur.fetchall()]
-                logger.info(f"Retrieved accuracy data for {len(accuracy_over_time)} days")
+            # Get accuracy over time
+            cur.execute("""
+                SELECT DATE(created_at) as date,
+                       AVG(CASE WHEN category = ai_category AND subcategory = ai_subcategory THEN 1 ELSE 0 END) * 100 as accuracy
+                FROM images
+                GROUP BY DATE(created_at)
+                ORDER BY date
+            """)
+            accuracy_over_time = [{'date': row[0], 'accuracy': row[1]} for row in cur.fetchall()]
 
-                # Get confusion matrix data
-                cur.execute("""
-                    SELECT ai_category, category, COUNT(*)
-                    FROM images
-                    GROUP BY ai_category, category
-                """)
-                confusion_data = cur.fetchall()
-                categories = sorted(set(row[0] for row in confusion_data) | set(row[1] for row in confusion_data))
-                confusion_matrix = np.zeros((len(categories), len(categories)), dtype=int)
-                category_to_index = {cat: i for i, cat in enumerate(categories)}
-                
-                for ai_cat, true_cat, count in confusion_data:
-                    i = category_to_index[true_cat]
-                    j = category_to_index[ai_cat]
-                    confusion_matrix[i, j] = count
-                logger.info(f"Created confusion matrix with {len(categories)} categories")
+            # Get confusion matrix data
+            cur.execute("""
+                SELECT ai_category, category, COUNT(*)
+                FROM images
+                GROUP BY ai_category, category
+            """)
+            confusion_data = cur.fetchall()
+            categories = sorted(set(row[0] for row in confusion_data) | set(row[1] for row in confusion_data))
+            confusion_matrix = np.zeros((len(categories), len(categories)), dtype=int)
+            category_to_index = {cat: i for i, cat in enumerate(categories)}
+            
+            for ai_cat, true_cat, count in confusion_data:
+                i = category_to_index[true_cat]
+                j = category_to_index[ai_cat]
+                confusion_matrix[i, j] = count
 
-                # Get top misclassifications
-                cur.execute("""
-                    SELECT ai_category, category, COUNT(*) as count
-                    FROM images
-                    WHERE ai_category != category
-                    GROUP BY ai_category, category
-                    ORDER BY count DESC
-                    LIMIT 10
-                """)
-                top_misclassifications = [
-                    {'Predicted': row[0], 'Actual': row[1], 'Count': row[2]}
-                    for row in cur.fetchall()
-                ]
-                logger.info(f"Retrieved {len(top_misclassifications)} top misclassifications")
+            # Get top misclassifications
+            cur.execute("""
+                SELECT ai_category, category, COUNT(*) as count
+                FROM images
+                WHERE ai_category != category
+                GROUP BY ai_category, category
+                ORDER BY count DESC
+                LIMIT 10
+            """)
+            top_misclassifications = [
+                {'Predicted': row[0], 'Actual': row[1], 'Count': row[2]}
+                for row in cur.fetchall()
+            ]
 
-                # Get confidence distribution
-                cur.execute("SELECT ai_confidence FROM images")
-                confidence_distribution = [{'confidence': row[0]} for row in cur.fetchall()]
-                logger.info(f"Retrieved confidence scores for {len(confidence_distribution)} images")
+            # Get confidence distribution
+            cur.execute("""
+                SELECT ai_confidence
+                FROM images
+            """)
+            confidence_distribution = [{'confidence': row[0]} for row in cur.fetchall()]
 
-                # Get token usage statistics
-                token_stats = self.get_token_usage_stats()
-                logger.info("Retrieved token usage statistics")
+            # Get token usage statistics
+            token_stats = self.get_token_usage_stats()
 
-                return {
-                    'total_images': total_images,
-                    'accuracy': accuracy,
-                    'category_distribution': category_distribution,
-                    'accuracy_over_time': accuracy_over_time,
-                    'confusion_matrix': confusion_matrix.tolist() if isinstance(confusion_matrix, np.ndarray) else [],
-                    'confusion_categories': categories,
-                    'top_misclassifications': top_misclassifications,
-                    'confidence_distribution': confidence_distribution,
-                    'token_usage': token_stats
-                }
-        except Exception as e:
-            logger.error(f"Error in get_statistics: {str(e)}")
             return {
-                'total_images': 0,
-                'accuracy': 0,
-                'category_distribution': [],
-                'accuracy_over_time': [],
-                'confusion_matrix': [],
-                'confusion_categories': [],
-                'top_misclassifications': [],
-                'confidence_distribution': [],
-                'token_usage': {
-                    'total_tokens': 0,
-                    'avg_tokens_per_image': 0,
-                    'usage_over_time': []
-                }
+                'total_images': total_images,
+                'accuracy': accuracy,
+                'category_distribution': category_distribution,
+                'accuracy_over_time': accuracy_over_time,
+                'confusion_matrix': confusion_matrix.tolist(),
+                'confusion_categories': categories,
+                'top_misclassifications': top_misclassifications,
+                'confidence_distribution': confidence_distribution,
+                'token_usage': token_stats
             }
+
+    def create_user(self, username, password, role='user'):
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO users (username, password_hash, role)
+                VALUES (%s, %s, %s)
+                RETURNING id
+            """, (username, hashed_password.decode('utf-8'), role))
+            result = cur.fetchone()
+            user_id = result[0] if result else None
+        self.conn.commit()
+        return user_id
+
+    def get_user_by_username(self, username):
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT id, username, password_hash, role FROM users WHERE username = %s", (username,))
+            user = cur.fetchone()
+        return user if user else None
+
+    def update_user_role(self, user_id, new_role):
+        with self.conn.cursor() as cur:
+            cur.execute("UPDATE users SET role = %s WHERE id = %s", (new_role, user_id))
+        self.conn.commit()
+
+    def get_all_users(self):
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT id, username, role FROM users")
+            return [{'id': row[0], 'username': row[1], 'role': row[2]} for row in cur.fetchall()]
