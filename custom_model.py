@@ -85,6 +85,10 @@ Where confidence_score is a number between 0 and 1. If you're not confident abou
                     ]
                 }]
             )
+            
+            # Get token usage and image size
+            token_usage = message.usage.output_tokens
+            image_size = len(image_base64)
 
             # Get the text content from the response
             response_text = message.content[0].text
@@ -100,21 +104,21 @@ Where confidence_score is a number between 0 and 1. If you're not confident abou
                     
                     # Check if the categories are valid
                     if main_category not in self.main_categories + ['Uncategorized']:
-                        return 'Uncategorized', 'Uncategorized', 0.0
+                        return 'Uncategorized', 'Uncategorized', 0.0, token_usage, image_size
                     
                     if main_category != 'Uncategorized' and subcategory not in self.subcategories[main_category]:
-                        return 'Uncategorized', 'Uncategorized', 0.0
+                        return 'Uncategorized', 'Uncategorized', 0.0, token_usage, image_size
                     
-                    return main_category, subcategory, confidence
+                    return main_category, subcategory, confidence, token_usage, image_size
                 
-                return 'Uncategorized', 'Uncategorized', 0.0
+                return 'Uncategorized', 'Uncategorized', 0.0, token_usage, image_size
             except (json.JSONDecodeError, KeyError, ValueError) as e:
                 print(f"Error parsing response: {str(e)}")
-                return 'Uncategorized', 'Uncategorized', 0.0
+                return 'Uncategorized', 'Uncategorized', 0.0, token_usage, image_size
 
         except Exception as e:
             print(f"Error in prediction: {str(e)}")
-            return 'Uncategorized', 'Uncategorized', 0.0
+            return 'Uncategorized', 'Uncategorized', 0.0, 0, 0
 
     def preprocess_image(self, image):
         """Convert numpy array to PIL Image."""
