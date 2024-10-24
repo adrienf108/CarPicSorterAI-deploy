@@ -243,6 +243,35 @@ def review_page():
                         st.session_state[button_key]["state"] = "main"
                         st.rerun()
 
+    # Add "Download All Images" button at the bottom of the page
+    st.write("---")  # Add a horizontal line for separation
+    st.subheader("Download All Images")
+    
+    # Create a buffer for the zip file
+    zip_buffer = io.BytesIO()
+    
+    # Create a ZipFile object
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # Group images by category and subcategory
+        for image in images:
+            # Create the folder path
+            folder_path = f"{image['category']}/{image['subcategory']}"
+            
+            # Add the image to the zip file in the appropriate folder
+            img_bytes = base64.b64decode(image['image_data'])
+            zf.writestr(f"{folder_path}/{image['filename']}", img_bytes)
+    
+    # Reset buffer position to the beginning
+    zip_buffer.seek(0)
+    
+    # Add the download button for the zip file
+    st.download_button(
+        label="Download All Images (Organized by Category)",
+        data=zip_buffer,
+        file_name="all_car_images.zip",
+        mime="application/zip"
+    )
+
 def statistics_page():
     st.header("AI Performance Analytics Dashboard")
     
