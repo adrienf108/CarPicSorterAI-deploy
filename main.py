@@ -1,305 +1,393 @@
 import streamlit as st
-import os
+from streamlit.runtime.scriptrunner import RerunException
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 from PIL import Image
 import io
-import zipfile
-import hashlib
 import base64
+import zipfile
 from database import Database
 from ai_model import AIModel
-from image_utils import resize_image, image_to_base64
+from image_utils import image_to_base64
 import bcrypt
+import hashlib
+import numpy as np
+import logging
+import os
 
-# Initialize the database and AI model
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Category and subcategory number mappings
+CATEGORY_NUMBERS = {
+    'Exterior': '01',
+    'Interior': '02',
+    'Engine': '03',
+    'Undercarriage': '04',
+    'Documents': '05',
+    'Uncategorized': '99'
+}
+
+SUBCATEGORY_NUMBERS = {
+    'Exterior': {
+        '3/4 front view': '01',
+        'Side profile': '02',
+        '3/4 rear view': '03',
+        'Rear view': '04',
+        'Wheels': '05',
+        'Details': '06',
+        'Defects': '07'
+    },
+    'Interior': {
+        'Full interior view': '01',
+        'Dashboard': '02',
+        'Front seats': '03',
+        "Driver's seat": '04',
+        'Rear seats': '05',
+        'Steering wheel': '06',
+        'Gear shift': '07',
+        'Pedals and floor mats': '08',
+        'Gauges/Instrument cluster': '09',
+        'Details': '10',
+        'Trunk/Boot': '11'
+    },
+    'Engine': {
+        'Full view': '01',
+        'Detail': '02'
+    },
+    'Undercarriage': {
+        'Undercarriage': '01'
+    },
+    'Documents': {
+        'Invoices/Receipts': '01',
+        'Service book': '02',
+        'Technical inspections/MOT certificates': '03'
+    },
+    'Uncategorized': {
+        'Uncategorized': '99'
+    }
+}
+
+# Initialize database and AI model
 db = Database()
 ai_model = AIModel()
 
-# Set page config
-st.set_page_config(page_title="Car Image Categorizer", layout="wide")
-
-# Session state initialization
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
-if 'user_id' not in st.session_state:
-    st.session_state.user_id = None
-if 'user_role' not in st.session_state:
-    st.session_state.user_role = None
-if 'total_tokens' not in st.session_state:
-    st.session_state.total_tokens = 0
-if 'processed_images' not in st.session_state:
-    st.session_state.processed_images = 0
+class User:
+    def __init__(self, id, username, role):
+        self.id = id
+        self.username = username
+        self.role = role
 
 def calculate_image_hash(image):
-    """Calculate a hash of the image content for duplicate detection"""
-    img_byte_arr = io.BytesIO()
-    image.save(img_byte_arr, format=image.format if image.format else 'PNG')
-    return hashlib.md5(img_byte_arr.getvalue()).hexdigest()
+    """Calculate a hash for the image to detect duplicates."""
+    return hashlib.md5(image.tobytes()).hexdigest()
 
-def handle_login():
-    st.title("Login")
-    username = st.text_input("Username", key="login_username")
-    password = st.text_input("Password", type="password", key="login_password")
-    
-    if st.button("Login", key="login_button"):
-        user = db.get_user_by_username(username)
-        if user and bcrypt.checkpw(password.encode('utf-8'), user[2].encode('utf-8')):
-            st.session_state.authenticated = True
-            st.session_state.user_id = user[0]
-            st.session_state.user_role = user[3]
-            st.success("Logged in successfully!")
-            st.rerun()
+def main():
+    st.set_page_config(page_title="AI-powered Car Image Categorization", layout="wide")
+    st.title("AI-powered Car Image Categorization")
+
+    # Check if user is logged in
+    if 'user' not in st.session_state or not st.session_state['user']:
+        login_page()
+    else:
+        # Sidebar for navigation
+        st.sidebar.title("Navigation")
+        page = st.sidebar.radio("Go to", ["Upload", "Review", "Statistics", "User Management"])
+
+        if page == "Upload":
+            upload_page()
+        elif page == "Review":
+            review_page()
+        elif page == "Statistics":
+            statistics_page()
+        elif page == "User Management" and st.session_state['user'].role == 'admin':
+            user_management_page()
         else:
-            st.error("Invalid username or password")
+            st.warning("You don't have permission to access this page.")
 
-def handle_registration():
-    st.title("Register")
-    username = st.text_input("Username", key="register_username")
-    password = st.text_input("Password", type="password", key="register_password")
+        if st.sidebar.button("Logout"):
+            st.session_state['user'] = None
+            st.rerun()
+
+def login_page():
+    st.header("Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
     
-    if st.button("Register", key="register_button"):
-        try:
-            user_id = db.create_user(username, password)
-            if user_id:
-                st.success("Registration successful! Please login.")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Login"):
+            user = db.get_user_by_username(username)
+            if user and bcrypt.checkpw(password.encode('utf-8'), user[2].encode('utf-8')):
+                st.session_state['user'] = User(user[0], user[1], user[3])
+                st.success("Logged in successfully!")
+                st.rerun()
             else:
-                st.error("Registration failed")
-        except Exception as e:
-            st.error(f"Registration failed: {str(e)}")
-
-def handle_user_management():
-    if st.session_state.user_role == 'admin':
-        st.title("User Management")
-        users = db.get_all_users()
-        
-        for user in users:
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.write(f"Username: {user['username']} (Current role: {user['role']})")
-            with col2:
-                if user['role'] == 'user':
-                    if st.button(f"Promote to Admin", key=f"promote_{user['id']}"):
-                        db.update_user_role(user['id'], 'admin')
-                        st.success(f"Promoted {user['username']} to admin")
-                        st.rerun()
-
-def process_uploaded_file(uploaded_file, user_id):
-    try:
-        # Read the image
-        image_bytes = uploaded_file.read()
-        image = Image.open(io.BytesIO(image_bytes))
-        
-        # Calculate image hash
-        image_hash = calculate_image_hash(image)
-        
-        # Check for duplicates in the database
-        with db.conn.cursor() as cur:
-            cur.execute("SELECT filename FROM images WHERE image_data LIKE %s", (f"%{image_hash}%",))
-            if cur.fetchone():
-                return True  # Duplicate found
-        
-        # Process the image
-        resized_image = resize_image(image)
-        main_category, subcategory, confidence = ai_model.predict(resized_image)
-        
-        # Save to database with hash
-        image_data = f"{image_hash}:{image_to_base64(resized_image)}"
-        db.save_image(uploaded_file.name, image_data, main_category, subcategory, user_id, confidence)
-        
-        return False  # Not a duplicate
-    except Exception as e:
-        st.error(f"Error processing {uploaded_file.name}: {str(e)}")
-        return False
-
-def handle_upload():
-    st.title("Upload Car Images")
-    uploaded_files = st.file_uploader("Choose image files", type=['png', 'jpg', 'jpeg'], accept_multiple_files=True, key="image_uploader")
-    uploaded_zip = st.file_uploader("Or upload a ZIP file containing images", type=['zip'], key="zip_uploader")
+                st.error("Invalid username or password")
     
-    if uploaded_files or uploaded_zip:
-        total_files = 0
+    with col2:
+        if st.button("Register"):
+            if username and password:
+                existing_user = db.get_user_by_username(username)
+                if existing_user:
+                    st.error("Username already exists")
+                else:
+                    user_count = len(db.get_all_users())
+                    role = 'admin' if user_count == 0 else 'user'
+                    user_id = db.create_user(username, password, role)
+                    st.session_state['user'] = User(user_id, username, role)
+                    st.success("Registered successfully!")
+                    st.rerun()
+            else:
+                st.error("Please enter both username and password")
+
+def upload_page():
+    st.header("Upload Car Images")
+    
+    # Reset duplicates_count at the beginning of the function
+    st.session_state['duplicates_count'] = 0
+    
+    # Display warning message if there were duplicate images skipped in the previous upload
+    if 'duplicates_count' in st.session_state and st.session_state['duplicates_count'] > 0:
+        st.warning(f"Skipped {st.session_state['duplicates_count']} duplicate image(s) in the previous upload.")
+    
+    uploaded_files = st.file_uploader("Choose images or zip files to upload", type=["jpg", "jpeg", "png", "zip"], accept_multiple_files=True)
+
+    if uploaded_files:
+        # Clear previous uploads
+        with db.conn.cursor() as cur:
+            cur.execute("DELETE FROM images")
+        db.conn.commit()
+        logger.info("Cleared previous uploads from database")
+
+        all_images = []
+        image_hashes = set()
         duplicates_count = 0
-        
-        if uploaded_zip:
-            with zipfile.ZipFile(uploaded_zip) as z:
-                for filename in z.namelist():
-                    if filename.startswith('__MACOSX/') or filename.startswith('.'):
-                        continue
-                    if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-                        with z.open(filename) as file:
-                            image_data = file.read()
-                            image_file = type('UploadedFile', (), {'name': filename, 'read': lambda: image_data})
-                            if process_uploaded_file(image_file, st.session_state.user_id):
-                                duplicates_count += 1
-                            total_files += 1
-        
-        if uploaded_files:
-            for uploaded_file in uploaded_files:
-                if process_uploaded_file(uploaded_file, st.session_state.user_id):
+
+        for uploaded_file in uploaded_files:
+            if uploaded_file.type == "application/zip":
+                with zipfile.ZipFile(uploaded_file) as z:
+                    for filename in z.namelist():
+                        if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and not filename.startswith('__MACOSX/'):
+                            with z.open(filename) as file:
+                                try:
+                                    img_data = file.read()
+                                    img = Image.open(io.BytesIO(img_data))
+                                    img_hash = calculate_image_hash(img)
+                                    if img_hash not in image_hashes:
+                                        image_hashes.add(img_hash)
+                                        all_images.append((filename, img))
+                                    else:
+                                        duplicates_count += 1
+                                except Exception as e:
+                                    st.warning(f"Skipped file {filename}: {str(e)}")
+            else:
+                img = Image.open(uploaded_file)
+                img_hash = calculate_image_hash(img)
+                if img_hash not in image_hashes:
+                    image_hashes.add(img_hash)
+                    all_images.append((uploaded_file.name, img))
+                else:
                     duplicates_count += 1
-                total_files += 1
-        
+
+        total_files = len(all_images)
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+
+        for i, (filename, image) in enumerate(all_images):
+            upload_progress = (i + 0.5) / total_files
+            progress_bar.progress(upload_progress)
+            status_text.text(f"Uploading and processing {i+1}/{total_files} images")
+
+            main_category, subcategory, confidence = ai_model.predict(image)
+            logger.info(f"AI Model prediction for {filename}: {main_category} - {subcategory} (Confidence: {confidence})")
+
+            image_data = image_to_base64(image)
+            db.save_image(filename, image_data, main_category, subcategory, st.session_state['user'].id, float(confidence))
+            logger.info(f"Saved image {filename} to database with categories: {main_category} - {subcategory}")
+
+            display_image = image.copy()
+            display_image.thumbnail((300, 300))
+
+            if main_category == 'Uncategorized':
+                st.image(display_image, caption=f"{filename}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
+            else:
+                st.image(display_image, caption=f"{filename}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
+
+            process_progress = (i + 1) / total_files
+            progress_bar.progress(process_progress)
+            status_text.text(f"Processed {i+1}/{total_files} images")
+
+        st.session_state['duplicates_count'] = duplicates_count
+
         st.success(f"Successfully uploaded and processed {total_files} images!")
         if duplicates_count > 0:
             st.info(f"Skipped {duplicates_count} duplicate image(s) during this upload.")
-            
-        # Display token usage statistics
-        if 'total_tokens' in st.session_state and 'processed_images' in st.session_state:
-            total_tokens = st.session_state.total_tokens
-            processed_images = st.session_state.processed_images
-            avg_tokens = total_tokens / processed_images if processed_images > 0 else 0
-            
-            st.write("---")
-            st.subheader("Token Usage Statistics")
-            st.write(f"Total tokens used: {total_tokens:,}")
-            st.write(f"Images processed: {processed_images}")
-            st.write(f"Average tokens per image: {avg_tokens:,.1f}")
-            
-            # Reset counters for next batch
-            st.session_state.total_tokens = 0
-            st.session_state.processed_images = 0
 
-def handle_review():
-    st.title("Review Images")
-    # Get all images from the database
+def review_page():
+    st.header("Review and Correct Categorizations")
+    
     images = db.get_all_images()
+    logger.info(f"Retrieved {len(images)} images for review")
     
     if not images:
-        st.write("No images to review")
+        st.warning("No images to review.")
         return
-    
-    # Create a zip file for download
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
-        for idx, image in enumerate(images):
-            # Extract image data and hash
-            image_parts = image['image_data'].split(':', 1)
-            if len(image_parts) == 2:
-                image_hash, image_base64 = image_parts
-            else:
-                image_base64 = image_parts[0]
-            
-            # Decode base64 image
-            image_data = base64.b64decode(image_base64)
-            
-            # Create standardized filename
-            filename = f"{image['category']}_{image['subcategory']}_{idx+1}.png"
-            zip_file.writestr(filename, image_data)
-    
-    # Download button
-    st.download_button(
-        label="Download All Images",
-        data=zip_buffer.getvalue(),
-        file_name="categorized_images.zip",
-        mime="application/zip",
-        key="download_all"
-    )
-    
-    # Display images in a grid
-    cols = st.columns(3)
-    for idx, image in enumerate(images):
-        with cols[idx % 3]:
-            # Extract image data and hash
-            image_parts = image['image_data'].split(':', 1)
-            if len(image_parts) == 2:
-                image_hash, image_base64 = image_parts
-            else:
-                image_base64 = image_parts[0]
-            
-            st.image(f"data:image/png;base64,{image_base64}", use_column_width=True)
-            
-            # Category selection
-            main_category = st.selectbox(
-                f"Main Category ({idx+1})",
-                ['Uncategorized'] + ai_model.main_categories,
-                index=(['Uncategorized'] + ai_model.main_categories).index(image['category']),
-                key=f"main_{idx}"
-            )
-            
-            subcategories = ai_model.subcategories.get(main_category, ['Uncategorized'])
-            subcategory = st.selectbox(
-                f"Subcategory ({idx+1})",
-                subcategories,
-                index=subcategories.index(image['subcategory']) if image['subcategory'] in subcategories else 0,
-                key=f"sub_{idx}"
-            )
-            
-            if st.button(f"Update ({idx+1})", key=f"update_{idx}"):
-                db.update_categorization(image['id'], main_category, subcategory)
-                st.success(f"Updated image {idx+1}")
 
-def handle_statistics():
-    st.title("AI Performance Statistics")
+    cols = st.columns(3)
+    for i, image in enumerate(images):
+        with cols[i % 3]:
+            with st.container():
+                st.image(base64.b64decode(image['image_data']), use_column_width=True)
+                logger.info(f"Displaying image {image['filename']} with categories: {image['category']} - {image['subcategory']}")
+                st.write(f"Current: {image['category']} - {image['subcategory']}")
+                
+                button_key = f"buttons_{image['id']}"
+                
+                if button_key not in st.session_state:
+                    st.session_state[button_key] = {"state": "main", "selected_category": None}
+                
+                if st.session_state[button_key]["state"] == "main":
+                    st.write("Select Main Category:")
+                    cols_categories = st.columns(3)
+                    for idx, category in enumerate(ai_model.model.main_categories + ['Uncategorized']):
+                        with cols_categories[idx % 3]:
+                            if st.button(category, key=f"{button_key}_{category}"):
+                                st.session_state[button_key]["state"] = "sub"
+                                st.session_state[button_key]["selected_category"] = category
+                                st.rerun()
+                
+                elif st.session_state[button_key]["state"] == "sub":
+                    selected_category = st.session_state[button_key]["selected_category"]
+                    if selected_category != 'Uncategorized':
+                        st.write(f"Select Subcategory for {selected_category}:")
+                        cols_subcategories = st.columns(3)
+                        subcategories = ai_model.model.subcategories[selected_category]
+                        for idx, subcategory in enumerate(subcategories):
+                            with cols_subcategories[idx % 3]:
+                                if st.button(subcategory, key=f"{button_key}_{subcategory}"):
+                                    db.update_categorization(image['id'], selected_category, subcategory)
+                                    ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), selected_category, subcategory)
+                                    st.session_state[button_key]["state"] = "main"
+                                    st.rerun()
+                    else:
+                        if st.button("Confirm Uncategorized", key=f"{button_key}_uncategorized"):
+                            db.update_categorization(image['id'], 'Uncategorized', 'Uncategorized')
+                            st.session_state[button_key]["state"] = "main"
+                            st.rerun()
+                    
+                    if st.button("Back", key=f"{button_key}_back"):
+                        st.session_state[button_key]["state"] = "main"
+                        st.rerun()
+
+    st.write("---")
+    st.subheader("Download All Images")
+    
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # Get file counter
+        file_counter = 1
+        
+        # Sort images by category and subcategory
+        sorted_images = sorted(images, key=lambda x: (
+            CATEGORY_NUMBERS.get(x['category'], '99'),
+            SUBCATEGORY_NUMBERS.get(x['category'], {}).get(x['subcategory'], '99')
+        ))
+        
+        for image in sorted_images:
+            # Get category and subcategory numbers
+            cat_num = CATEGORY_NUMBERS.get(image['category'], '99')
+            subcat_num = SUBCATEGORY_NUMBERS.get(image['category'], {}).get(image['subcategory'], '99')
+            
+            # Get file extension from original filename
+            _, ext = os.path.splitext(image['filename'])
+            if not ext:
+                ext = '.jpg'  # Default to .jpg if no extension
+            
+            # Create filename with category numbers and counter
+            filename = f"{cat_num}{subcat_num}_{file_counter:04d}{ext}"
+            
+            # Add the image to the zip file (no subfolders)
+            img_bytes = base64.b64decode(image['image_data'])
+            zf.writestr(filename, img_bytes)
+            
+            file_counter += 1
+    
+    zip_buffer.seek(0)
+    
+    st.download_button(
+        label="Download All Images (Organized by Category)",
+        data=zip_buffer,
+        file_name="all_car_images.zip",
+        mime="application/zip",
+        key="download_all_images_button"
+    )
+
+def statistics_page():
+    st.header("AI Performance Analytics Dashboard")
+    
     stats = db.get_statistics()
     
-    # Overall Statistics
-    st.subheader("Overall Statistics")
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Total Images", stats['total_images'])
     with col2:
-        st.metric("Overall Accuracy", f"{stats['accuracy']:.1f}%")
+        st.metric("Overall Accuracy", f"{stats['accuracy']:.2f}%")
+    with col3:
+        st.metric("Unique Categories", len(stats['category_distribution']))
     
-    # Category Distribution
     st.subheader("Category Distribution")
-    category_data = {item['category']: item['count'] for item in stats['category_distribution']}
-    st.bar_chart(category_data)
+    category_df = pd.DataFrame(stats['category_distribution'])
+    fig = px.pie(category_df, values='count', names='category', title='Category Distribution')
+    st.plotly_chart(fig)
     
-    # Accuracy Over Time
     st.subheader("Accuracy Over Time")
-    accuracy_data = {str(item['date']): item['accuracy'] for item in stats['accuracy_over_time']}
-    st.line_chart(accuracy_data)
+    accuracy_df = pd.DataFrame(stats['accuracy_over_time'])
+    fig = px.line(accuracy_df, x='date', y='accuracy', title='AI Model Accuracy Over Time')
+    st.plotly_chart(fig)
     
-    # Confusion Matrix
     st.subheader("Confusion Matrix")
-    import plotly.figure_factory as ff
-    fig = ff.create_annotated_heatmap(
-        stats['confusion_matrix'],
-        x=stats['confusion_categories'],
-        y=stats['confusion_categories'],
+    confusion_matrix = np.array(stats['confusion_matrix'])
+    categories = stats['confusion_categories']
+    
+    fig = go.Figure(data=go.Heatmap(
+        z=confusion_matrix,
+        x=categories,
+        y=categories,
+        hoverongaps=False,
         colorscale='Viridis'
+    ))
+    fig.update_layout(
+        title='Confusion Matrix',
+        xaxis_title='Predicted Category',
+        yaxis_title='True Category'
     )
     st.plotly_chart(fig)
     
-    # Top Misclassifications
     st.subheader("Top Misclassifications")
-    st.table(stats['top_misclassifications'])
+    misclassifications = stats['top_misclassifications']
+    misclass_df = pd.DataFrame(misclassifications)
+    st.table(misclass_df)
     
-    # Confidence Distribution
     st.subheader("Confidence Distribution")
-    confidence_values = [item['confidence'] for item in stats['confidence_distribution']]
-    st.bar_chart(confidence_values)  # Changed from histogram_chart to bar_chart
+    confidence_df = pd.DataFrame(stats['confidence_distribution'])
+    fig = px.histogram(confidence_df, x='confidence', nbins=20, title='Distribution of AI Confidence Scores')
+    st.plotly_chart(fig)
 
-def main():
-    if not st.session_state.authenticated:
-        tab1, tab2 = st.tabs(["Login", "Register"])
-        with tab1:
-            handle_login()
-        with tab2:
-            handle_registration()
-    else:
-        # Sidebar navigation
-        page = st.sidebar.radio(
-            "Navigation",
-            ["Upload", "Review", "Statistics"] + (["User Management"] if st.session_state.user_role == 'admin' else []),
-            key="navigation"
-        )
-        
-        # Logout button
-        if st.sidebar.button("Logout", key="logout"):
-            st.session_state.authenticated = False
-            st.session_state.user_id = None
-            st.session_state.user_role = None
-            st.rerun()
-        
-        # Page routing
-        if page == "Upload":
-            handle_upload()
-        elif page == "Review":
-            handle_review()
-        elif page == "Statistics":
-            handle_statistics()
-        elif page == "User Management":
-            handle_user_management()
+def user_management_page():
+    st.header("User Management")
+    
+    users = db.get_all_users()
+    for user in users:
+        st.write(f"Username: {user['username']}, Role: {user['role']}")
+        if user['role'] == 'user':
+            if st.button(f"Promote {user['username']} to Admin"):
+                db.update_user_role(user['id'], 'admin')
+                st.success(f"{user['username']} promoted to Admin")
+                st.rerun()
 
 if __name__ == "__main__":
     main()

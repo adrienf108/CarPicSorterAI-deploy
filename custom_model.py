@@ -4,12 +4,6 @@ import anthropic
 from PIL import Image
 import io
 import os
-import streamlit as st
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 class CustomModel:
     def __init__(self):
@@ -91,23 +85,6 @@ Where confidence_score is a number between 0 and 1. If you're not confident abou
                     ]
                 }]
             )
-
-            # Get token usage from the response
-            input_tokens = message.usage.input_tokens
-            output_tokens = message.usage.output_tokens
-            total_tokens = input_tokens + output_tokens
-            
-            # Log token usage
-            logger.info(f"Token usage: Input={input_tokens}, Output={output_tokens}, Total={total_tokens}")
-            
-            # Store token usage in session state
-            if 'total_tokens' not in st.session_state:
-                st.session_state['total_tokens'] = 0
-            if 'processed_images' not in st.session_state:
-                st.session_state['processed_images'] = 0
-                
-            st.session_state['total_tokens'] += total_tokens
-            st.session_state['processed_images'] += 1
 
             # Get the text content from the response
             response_text = message.content[0].text
