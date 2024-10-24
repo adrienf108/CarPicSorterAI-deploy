@@ -10,8 +10,8 @@ class AIModel:
         # image is now a PIL Image object
         preprocessed_image = self.preprocess_image(image)
         
-        # Get predictions
-        main_category, subcategory, confidence = self.model.predict(preprocessed_image)
+        # Get predictions and unpack only the needed values
+        main_category, subcategory, confidence, _, _ = self.model.predict(preprocessed_image)
         
         return main_category, subcategory, float(confidence)
 
