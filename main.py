@@ -13,6 +13,11 @@ from image_utils import image_to_base64
 import bcrypt
 import hashlib
 import numpy as np
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Initialize database and AI model
 db = Database()
@@ -140,11 +145,14 @@ def upload_page():
             status_text.text(f"Uploading and processing {i+1}/{total_files} images")
 
             main_category, subcategory, confidence = ai_model.predict(image)
+            logger.info(f"AI Model prediction for {filename}: {main_category} - {subcategory} (Confidence: {confidence})")
 
             # Save the original image without resizing
             image_data = image_to_base64(image)
 
+            # Save to database with the predicted categories
             db.save_image(filename, image_data, main_category, subcategory, st.session_state['user'].id, float(confidence))
+            logger.info(f"Saved image {filename} to database with categories: {main_category} - {subcategory}")
 
             # Display a resized version of the image in the UI
             display_image = image.copy()
@@ -170,6 +178,7 @@ def review_page():
     st.header("Review and Correct Categorizations")
     
     images = db.get_all_images()
+    logger.info(f"Retrieved {len(images)} images for review")
     
     if not images:
         st.warning("No images to review.")
@@ -193,6 +202,7 @@ def review_page():
     for i, image in enumerate(page_images):
         with cols[i % 3]:
             st.image(base64.b64decode(image['image_data']), use_column_width=True)
+            logger.info(f"Displaying image {image['filename']} with categories: {image['category']} - {image['subcategory']}")
             st.write(f"Current: {image['category']} - {image['subcategory']}")
             
             # Use a unique key for each set of buttons

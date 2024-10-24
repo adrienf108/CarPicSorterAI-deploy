@@ -4,6 +4,11 @@ import bcrypt
 import pandas as pd
 from datetime import datetime, timedelta
 import numpy as np
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self):
@@ -52,6 +57,7 @@ class Database:
 
     def save_image(self, filename, image_data, category, subcategory, user_id, ai_confidence: float):
         with self.conn.cursor() as cur:
+            logger.info(f"Saving image {filename} with category: {category} - {subcategory}")
             cur.execute("""
                 INSERT INTO images (filename, image_data, category, subcategory, ai_category, ai_subcategory, ai_confidence, user_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
@@ -60,7 +66,13 @@ class Database:
 
     def get_all_images(self):
         with self.conn.cursor() as cur:
-            cur.execute("SELECT id, filename, image_data, category, subcategory, user_id FROM images")
+            cur.execute("""
+                SELECT id, filename, image_data, category, subcategory, user_id
+                FROM images
+                ORDER BY created_at DESC
+            """)
+            results = cur.fetchall()
+            logger.info(f"Retrieved {len(results)} images from database")
             return [
                 {
                     'id': row[0],
@@ -75,6 +87,7 @@ class Database:
 
     def update_categorization(self, image_id, new_category, new_subcategory):
         with self.conn.cursor() as cur:
+            logger.info(f"Updating image {image_id} with new categories: {new_category} - {new_subcategory}")
             cur.execute("""
                 UPDATE images
                 SET category = %s, subcategory = %s
