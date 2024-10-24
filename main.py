@@ -2,6 +2,7 @@ import streamlit as st
 from PIL import Image
 import io
 import os
+import zipfile
 
 # Set page configuration
 st.set_page_config(
@@ -27,32 +28,53 @@ st.title("🚗 Car Image Categorization")
 st.markdown("""
     Upload car images for AI-powered categorization. Our system will analyze your images
     and provide detailed information about the car make and model.
+    You can upload individual images or a zip file containing multiple images.
 """)
 
 # Create upload section
-st.header("Upload Image")
-uploaded_file = st.file_uploader("Choose a car image...", type=["jpg", "jpeg", "png"])
+st.header("Upload Images")
+uploaded_file = st.file_uploader("Choose car images or a zip file...", type=["jpg", "jpeg", "png", "zip"], accept_multiple_files=True)
 
 # Create two columns for layout
 col1, col2 = st.columns(2)
 
-if uploaded_file is not None:
-    # Read and display the image
+if uploaded_file:
     with col1:
-        st.subheader("Uploaded Image")
-        image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Car Image", use_column_width=True)
+        st.subheader("Uploaded Images")
         
-        # Display image information
-        file_details = {
-            "Filename": uploaded_file.name,
-            "File size": f"{uploaded_file.size / 1024:.2f} KB",
-            "File type": uploaded_file.type
-        }
-        
-        st.subheader("Image Details")
-        for key, value in file_details.items():
-            st.text(f"{key}: {value}")
+        for file in uploaded_file:
+            if file.type == "application/zip":
+                st.write(f"Processing zip file: {file.name}")
+                with zipfile.ZipFile(file) as z:
+                    for filename in z.namelist():
+                        if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and not filename.startswith('__MACOSX/'):
+                            with z.open(filename) as image_file:
+                                try:
+                                    image = Image.open(io.BytesIO(image_file.read()))
+                                    st.image(image, caption=f"From zip: {filename}", use_column_width=True)
+                                    
+                                    # Display image information
+                                    st.text(f"Filename: {filename}")
+                                    st.text(f"Size: {image.size}")
+                                    st.text(f"Format: {image.format}")
+                                except Exception as e:
+                                    st.warning(f"Could not process {filename}: {str(e)}")
+            else:
+                try:
+                    image = Image.open(file)
+                    st.image(image, caption=f"Uploaded: {file.name}", use_column_width=True)
+                    
+                    # Display image information
+                    file_details = {
+                        "Filename": file.name,
+                        "File size": f"{file.size / 1024:.2f} KB",
+                        "File type": file.type
+                    }
+                    
+                    for key, value in file_details.items():
+                        st.text(f"{key}: {value}")
+                except Exception as e:
+                    st.warning(f"Could not process {file.name}: {str(e)}")
 
     with col2:
         st.subheader("Image Processing")
@@ -65,4 +87,4 @@ if uploaded_file is not None:
 else:
     # Display placeholder message when no image is uploaded
     with col1:
-        st.info("Please upload an image to begin analysis")
+        st.info("Please upload images or a zip file to begin analysis")
