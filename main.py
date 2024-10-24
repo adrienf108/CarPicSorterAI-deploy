@@ -20,6 +20,56 @@ import os
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Category and subcategory number mappings
+CATEGORY_NUMBERS = {
+    'Exterior': '01',
+    'Interior': '02',
+    'Engine': '03',
+    'Undercarriage': '04',
+    'Documents': '05',
+    'Uncategorized': '99'
+}
+
+SUBCATEGORY_NUMBERS = {
+    'Exterior': {
+        '3/4 front view': '01',
+        'Side profile': '02',
+        '3/4 rear view': '03',
+        'Rear view': '04',
+        'Wheels': '05',
+        'Details': '06',
+        'Defects': '07'
+    },
+    'Interior': {
+        'Full interior view': '01',
+        'Dashboard': '02',
+        'Front seats': '03',
+        "Driver's seat": '04',
+        'Rear seats': '05',
+        'Steering wheel': '06',
+        'Gear shift': '07',
+        'Pedals and floor mats': '08',
+        'Gauges/Instrument cluster': '09',
+        'Details': '10',
+        'Trunk/Boot': '11'
+    },
+    'Engine': {
+        'Full view': '01',
+        'Detail': '02'
+    },
+    'Undercarriage': {
+        'Undercarriage': '01'
+    },
+    'Documents': {
+        'Invoices/Receipts': '01',
+        'Service book': '02',
+        'Technical inspections/MOT certificates': '03'
+    },
+    'Uncategorized': {
+        'Uncategorized': '99'
+    }
+}
+
 # Initialize database and AI model
 db = Database()
 ai_model = AIModel()
@@ -238,30 +288,33 @@ def review_page():
     zip_buffer = io.BytesIO()
     
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # Create a dictionary to store file counts for each folder
-        folder_counters = {}
+        # Get file counter
+        file_counter = 1
         
-        for image in images:
-            # Create the base folder path
-            folder_path = f"{image['category']}/{image['subcategory']}"
+        # Sort images by category and subcategory
+        sorted_images = sorted(images, key=lambda x: (
+            CATEGORY_NUMBERS.get(x['category'], '99'),
+            SUBCATEGORY_NUMBERS.get(x['category'], {}).get(x['subcategory'], '99')
+        ))
+        
+        for image in sorted_images:
+            # Get category and subcategory numbers
+            cat_num = CATEGORY_NUMBERS.get(image['category'], '99')
+            subcat_num = SUBCATEGORY_NUMBERS.get(image['category'], {}).get(image['subcategory'], '99')
             
-            # Generate unique filename with counter
-            if folder_path not in folder_counters:
-                folder_counters[folder_path] = 1
-            else:
-                folder_counters[folder_path] += 1
-                
             # Get file extension from original filename
             _, ext = os.path.splitext(image['filename'])
             if not ext:
                 ext = '.jpg'  # Default to .jpg if no extension
-                
-            # Create unique filename with counter
-            unique_filename = f"{folder_path}/{folder_counters[folder_path]:04d}{ext}"
             
-            # Add the image to the zip file
+            # Create filename with category numbers and counter
+            filename = f"{cat_num}{subcat_num}_{file_counter:04d}{ext}"
+            
+            # Add the image to the zip file (no subfolders)
             img_bytes = base64.b64decode(image['image_data'])
-            zf.writestr(unique_filename, img_bytes)
+            zf.writestr(filename, img_bytes)
+            
+            file_counter += 1
     
     zip_buffer.seek(0)
     
