@@ -10,12 +10,9 @@ class AIModel:
         # image is now a PIL Image object
         preprocessed_image = self.preprocess_image(image)
         
-        # Get all predictions from custom model
+        # Get all predictions from custom model, including token usage and image size
         main_category, subcategory, confidence, token_usage, image_size = self.model.predict(preprocessed_image)
-        
-        # Store token usage and image size in database if needed
-        # For now, just return the original three values
-        return main_category, subcategory, float(confidence)
+        return main_category, subcategory, float(confidence), token_usage, image_size
 
     def preprocess_image(self, image):
         # image is now a PIL Image object
