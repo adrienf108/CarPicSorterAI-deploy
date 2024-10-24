@@ -14,6 +14,7 @@ import bcrypt
 import hashlib
 import numpy as np
 import logging
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -105,6 +106,12 @@ def upload_page():
     uploaded_files = st.file_uploader("Choose images or zip files to upload", type=["jpg", "jpeg", "png", "zip"], accept_multiple_files=True)
 
     if uploaded_files:
+        # Clear previous uploads
+        with db.conn.cursor() as cur:
+            cur.execute("DELETE FROM images")
+        db.conn.commit()
+        logger.info("Cleared previous uploads from database")
+
         all_images = []
         image_hashes = set()
         duplicates_count = 0
@@ -147,14 +154,10 @@ def upload_page():
             main_category, subcategory, confidence = ai_model.predict(image)
             logger.info(f"AI Model prediction for {filename}: {main_category} - {subcategory} (Confidence: {confidence})")
 
-            # Save the original image without resizing
             image_data = image_to_base64(image)
-
-            # Save to database with the predicted categories
             db.save_image(filename, image_data, main_category, subcategory, st.session_state['user'].id, float(confidence))
             logger.info(f"Saved image {filename} to database with categories: {main_category} - {subcategory}")
 
-            # Display a resized version of the image in the UI
             display_image = image.copy()
             display_image.thumbnail((300, 300))
 
@@ -167,7 +170,6 @@ def upload_page():
             progress_bar.progress(process_progress)
             status_text.text(f"Processed {i+1}/{total_files} images")
 
-        # Store the duplicates count in the session state for the next upload
         st.session_state['duplicates_count'] = duplicates_count
 
         st.success(f"Successfully uploaded and processed {total_files} images!")
@@ -184,18 +186,14 @@ def review_page():
         st.warning("No images to review.")
         return
 
-    # Display all images in a grid with 3 columns
     cols = st.columns(3)
     for i, image in enumerate(images):
         with cols[i % 3]:
-            # Create a container for each image and its controls
             with st.container():
-                # Display the image
                 st.image(base64.b64decode(image['image_data']), use_column_width=True)
                 logger.info(f"Displaying image {image['filename']} with categories: {image['category']} - {image['subcategory']}")
                 st.write(f"Current: {image['category']} - {image['subcategory']}")
                 
-                # Use a unique key for each set of buttons
                 button_key = f"buttons_{image['id']}"
                 
                 if button_key not in st.session_state:
@@ -234,28 +232,39 @@ def review_page():
                         st.session_state[button_key]["state"] = "main"
                         st.rerun()
 
-    # Add "Download All Images" button at the bottom of the page
-    st.write("---")  # Add a horizontal line for separation
+    st.write("---")
     st.subheader("Download All Images")
     
-    # Create a buffer for the zip file
     zip_buffer = io.BytesIO()
     
-    # Create a ZipFile object
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # Group images by category and subcategory
+        # Create a dictionary to store file counts for each folder
+        folder_counters = {}
+        
         for image in images:
-            # Create the folder path
+            # Create the base folder path
             folder_path = f"{image['category']}/{image['subcategory']}"
             
-            # Add the image to the zip file in the appropriate folder
+            # Generate unique filename with counter
+            if folder_path not in folder_counters:
+                folder_counters[folder_path] = 1
+            else:
+                folder_counters[folder_path] += 1
+                
+            # Get file extension from original filename
+            _, ext = os.path.splitext(image['filename'])
+            if not ext:
+                ext = '.jpg'  # Default to .jpg if no extension
+                
+            # Create unique filename with counter
+            unique_filename = f"{folder_path}/{folder_counters[folder_path]:04d}{ext}"
+            
+            # Add the image to the zip file
             img_bytes = base64.b64decode(image['image_data'])
-            zf.writestr(f"{folder_path}/{image['filename']}", img_bytes)
+            zf.writestr(unique_filename, img_bytes)
     
-    # Reset buffer position to the beginning
     zip_buffer.seek(0)
     
-    # Add the download button for the zip file with a unique key
     st.download_button(
         label="Download All Images (Organized by Category)",
         data=zip_buffer,
