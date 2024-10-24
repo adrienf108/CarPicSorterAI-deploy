@@ -1,8 +1,5 @@
 {pkgs}: {
   deps = [
-    pkgs.which
-    pkgs.libpng
-    pkgs.libjpeg_turbo
     pkgs.rustc
     pkgs.libiconv
     pkgs.cargo

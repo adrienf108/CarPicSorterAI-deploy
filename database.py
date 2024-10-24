@@ -50,13 +50,12 @@ class Database:
         self.conn.commit()
         self.create_tables()
 
-    def save_image(self, filename, image_data, ai_category, ai_subcategory, user_id, ai_confidence: float):
-        """Save image with separate AI predictions and initial categorization."""
+    def save_image(self, filename, image_data, category, subcategory, user_id, ai_confidence: float):
         with self.conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO images (filename, image_data, category, subcategory, ai_category, ai_subcategory, ai_confidence, user_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (filename, image_data, ai_category, ai_subcategory, ai_category, ai_subcategory, ai_confidence, user_id))
+            """, (filename, image_data, category, subcategory, category, subcategory, ai_confidence, user_id))
         self.conn.commit()
 
     def get_all_images(self):
@@ -65,9 +64,6 @@ class Database:
                 SELECT id, filename, image_data, category, subcategory, ai_category, ai_subcategory, ai_confidence, user_id 
                 FROM images
             """)
-            rows = cur.fetchall()
-            if not rows:
-                return []
             return [
                 {
                     'id': row[0],
@@ -80,7 +76,7 @@ class Database:
                     'ai_confidence': row[7],
                     'user_id': row[8]
                 }
-                for row in rows
+                for row in cur.fetchall()
             ]
 
     def update_categorization(self, image_id, new_category, new_subcategory):
@@ -95,15 +91,13 @@ class Database:
     def get_statistics(self):
         with self.conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM images")
-            row = cur.fetchone()
-            total_images = row[0] if row else 0
+            total_images = cur.fetchone()[0]
 
             cur.execute("""
                 SELECT COUNT(*) FROM images
                 WHERE category = ai_category AND subcategory = ai_subcategory
             """)
-            row = cur.fetchone()
-            correct_predictions = row[0] if row else 0
+            correct_predictions = cur.fetchone()[0]
             accuracy = (correct_predictions / total_images) * 100 if total_images > 0 else 0
 
             cur.execute("""
