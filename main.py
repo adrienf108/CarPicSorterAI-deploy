@@ -1,90 +1,81 @@
 import streamlit as st
 from PIL import Image
 import io
-import os
-import zipfile
 
-# Set page configuration
-st.set_page_config(
-    page_title="Car Image Categorization",
-    page_icon="🚗",
-    layout="wide"
-)
+def main():
+    # Set page configuration
+    st.set_page_config(
+        page_title="Car Image Classifier",
+        page_icon="🚗",
+        layout="wide"
+    )
 
-# Add custom CSS
-st.markdown("""
-    <style>
-    .main {
-        padding: 2rem;
-    }
-    .stButton>button {
-        width: 100%;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    # Main title and description
+    st.title("🚗 Car Image Classifier")
+    st.markdown("""
+    Upload car images for AI-powered classification and manual review.
+    This tool helps you automatically categorize different types of cars.
+    """)
 
-# Title and description
-st.title("🚗 Car Image Categorization")
-st.markdown("""
-    Upload car images for AI-powered categorization. Our system will analyze your images
-    and provide detailed information about the car make and model.
-    You can upload individual images or a zip file containing multiple images.
-""")
+    # Sidebar for controls
+    with st.sidebar:
+        st.header("Controls")
+        st.info("Upload an image to get started")
 
-# Create upload section
-st.header("Upload Images")
-uploaded_file = st.file_uploader("Choose car images or a zip file...", type=["jpg", "jpeg", "png", "zip"], accept_multiple_files=True)
+    # File uploader
+    uploaded_file = st.file_uploader(
+        "Choose a car image...",
+        type=["jpg", "jpeg", "png"],
+        help="Supported formats: JPG, JPEG, PNG"
+    )
 
-# Create two columns for layout
-col1, col2 = st.columns(2)
+    # Create two columns for layout
+    col1, col2 = st.columns(2)
 
-if uploaded_file:
-    with col1:
-        st.subheader("Uploaded Images")
-        
-        for file in uploaded_file:
-            if file.type == "application/zip":
-                st.write(f"Processing zip file: {file.name}")
-                with zipfile.ZipFile(file) as z:
-                    for filename in z.namelist():
-                        if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and not filename.startswith('__MACOSX/'):
-                            with z.open(filename) as image_file:
-                                try:
-                                    image = Image.open(io.BytesIO(image_file.read()))
-                                    st.image(image, caption=f"From zip: {filename}", use_column_width=True)
-                                    
-                                    # Display image information
-                                    st.text(f"Filename: {filename}")
-                                    st.text(f"Size: {image.size}")
-                                    st.text(f"Format: {image.format}")
-                                except Exception as e:
-                                    st.warning(f"Could not process {filename}: {str(e)}")
-            else:
-                try:
-                    image = Image.open(file)
-                    st.image(image, caption=f"Uploaded: {file.name}", use_column_width=True)
+    if uploaded_file is not None:
+        try:
+            # Read and display the uploaded image
+            image = Image.open(uploaded_file)
+            
+            with col1:
+                st.subheader("Uploaded Image")
+                st.image(image, use_column_width=True)
+                
+                # Display image details
+                file_details = {
+                    "Filename": uploaded_file.name,
+                    "File size": f"{uploaded_file.size / 1024:.2f} KB",
+                    "Image dimensions": f"{image.size[0]}x{image.size[1]} pixels"
+                }
+                st.write("### Image Details")
+                for key, value in file_details.items():
+                    st.write(f"**{key}:** {value}")
+
+            with col2:
+                st.subheader("Classification Results")
+                st.info("AI classification will be implemented in the next phase")
+                
+                # Placeholder for future AI classification results
+                with st.expander("Classification Details", expanded=True):
+                    st.write("Waiting for AI model integration...")
+                
+                # Manual review section
+                st.subheader("Manual Review")
+                review_status = st.selectbox(
+                    "Review Status",
+                    ["Pending Review", "Approved", "Rejected"]
+                )
+                review_notes = st.text_area("Review Notes")
+                
+                if st.button("Submit Review"):
+                    st.success("Review submitted successfully!")
                     
-                    # Display image information
-                    file_details = {
-                        "Filename": file.name,
-                        "File size": f"{file.size / 1024:.2f} KB",
-                        "File type": file.type
-                    }
-                    
-                    for key, value in file_details.items():
-                        st.text(f"{key}: {value}")
-                except Exception as e:
-                    st.warning(f"Could not process {file.name}: {str(e)}")
+        except Exception as e:
+            st.error(f"Error processing image: {str(e)}")
+    else:
+        # Display placeholder when no image is uploaded
+        with col1:
+            st.info("Please upload an image to begin")
 
-    with col2:
-        st.subheader("Image Processing")
-        st.info("AI analysis will be implemented in the next phase.")
-        
-        # Placeholder for future AI processing results
-        st.markdown("### Categories")
-        st.text("🔄 Waiting for AI analysis...")
-        
-else:
-    # Display placeholder message when no image is uploaded
-    with col1:
-        st.info("Please upload images or a zip file to begin analysis")
+if __name__ == "__main__":
+    main()
