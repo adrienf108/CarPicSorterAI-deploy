@@ -1,7 +1,9 @@
-import tensorflow as tf
-from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
-from tensorflow.keras.models import Model, Sequential
+import base64
+import json
+import anthropic
+from PIL import Image
+import io
+import os
 
 class CustomModel:
     def __init__(self):
@@ -18,65 +20,106 @@ class CustomModel:
         # Set confidence threshold
         self.confidence_threshold = 0.7
         
-        # Create the model
-        self.model = self._create_model()
-    
-    def _create_model(self):
+        # Initialize Anthropic client with API key from environment
+        self.client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+
+    def _format_prompt(self):
+        """Create a structured prompt for image classification."""
+        categories_str = json.dumps(self.main_categories, indent=2)
+        subcategories_str = json.dumps(self.subcategories, indent=2)
+        
+        return f"""Please analyze this car image and classify it according to these categories and subcategories:
+
+Main Categories:
+{categories_str}
+
+Subcategories for each main category:
+{subcategories_str}
+
+Please respond with ONLY a JSON object in this exact format:
+{{
+    "main_category": "category_name",
+    "subcategory": "subcategory_name",
+    "confidence": confidence_score
+}}
+
+Where confidence_score is a number between 0 and 1. If you're not confident about the classification (confidence < 0.7), use:
+{{
+    "main_category": "Uncategorized",
+    "subcategory": "Uncategorized",
+    "confidence": confidence_score
+}}"""
+
+    def _image_to_base64(self, image):
+        """Convert PIL Image to base64 string."""
+        buffered = io.BytesIO()
+        image.save(buffered, format="JPEG")
+        return base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+    def predict(self, image):
+        """Predict the category and subcategory of an image using Anthropic's Claude."""
         try:
-            # Attempt to create MobileNetV2 base model
-            base_model = MobileNetV2(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
-            x = GlobalAveragePooling2D()(base_model.output)
-            main_output = Dense(len(self.main_categories), activation='softmax', name='main_category')(x)
-            subcategory_output = Dense(max(len(subcats) for subcats in self.subcategories.values()), activation='softmax', name='subcategory')(x)
-            model = Model(inputs=base_model.input, outputs=[main_output, subcategory_output])
+            # Convert image to base64
+            image_base64 = self._image_to_base64(image)
+            
+            # Create the message with the image
+            message = self.client.messages.create(
+                model="claude-3-opus-20240229",
+                max_tokens=1024,
+                temperature=0,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": image_base64
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": self._format_prompt()
+                        }
+                    ]
+                }]
+            )
+
+            # Get the text content from the response
+            response_text = message.content[0].text
+            
+            # Parse the response
+            try:
+                result = json.loads(response_text)
+                if isinstance(result, dict) and all(k in result for k in ['main_category', 'subcategory', 'confidence']):
+                    # Validate the main category and subcategory
+                    main_category = result['main_category']
+                    subcategory = result['subcategory']
+                    confidence = float(result['confidence'])
+                    
+                    # Check if the categories are valid
+                    if main_category not in self.main_categories + ['Uncategorized']:
+                        return 'Uncategorized', 'Uncategorized', 0.0
+                    
+                    if main_category != 'Uncategorized' and subcategory not in self.subcategories[main_category]:
+                        return 'Uncategorized', 'Uncategorized', 0.0
+                    
+                    return main_category, subcategory, confidence
+                
+                return 'Uncategorized', 'Uncategorized', 0.0
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                print(f"Error parsing response: {str(e)}")
+                return 'Uncategorized', 'Uncategorized', 0.0
+
         except Exception as e:
-            print(f"Error creating MobileNetV2 model: {e}")
-            print("Falling back to a simple Sequential model")
-            # Create a simple Sequential model as a fallback
-            model = Sequential([
-                Dense(64, activation='relu', input_shape=(224, 224, 3)),
-                GlobalAveragePooling2D(),
-                Dense(len(self.main_categories), activation='softmax', name='main_category'),
-                Dense(max(len(subcats) for subcats in self.subcategories.values()), activation='softmax', name='subcategory')
-            ])
-        
-        # Compile the model
-        model.compile(optimizer='adam',
-                      loss={'main_category': 'categorical_crossentropy', 'subcategory': 'categorical_crossentropy'},
-                      loss_weights={'main_category': 1.0, 'subcategory': 1.0},
-                      metrics=['accuracy'])
-        
-        return model
-    
-    def predict(self, preprocessed_image):
-        # Make predictions
-        main_pred, subcategory_pred = self.model.predict(preprocessed_image)
-        
-        # Get the main category and its confidence
-        main_category_index = tf.argmax(main_pred[0]).numpy()
-        main_category_confidence = tf.reduce_max(main_pred[0]).numpy()
-        
-        if main_category_confidence < self.confidence_threshold:
-            return 'Uncategorized', 'Uncategorized', main_category_confidence
-        
-        main_category = self.main_categories[main_category_index]
-        
-        # Get the subcategory
-        subcategory_index = tf.argmax(subcategory_pred[0]).numpy()
-        subcategory = self.subcategories[main_category][subcategory_index % len(self.subcategories[main_category])]
-        
-        return main_category, subcategory, main_category_confidence
+            print(f"Error in prediction: {str(e)}")
+            return 'Uncategorized', 'Uncategorized', 0.0
 
     def preprocess_image(self, image):
-        # Resize the image to 224x224
-        image = tf.image.resize(image, (224, 224))
-        # Normalize the image
-        image = image / 255.0
-        # Add batch dimension
-        image = tf.expand_dims(image, 0)
-        return image
+        """Convert numpy array to PIL Image."""
+        return Image.fromarray(image)
 
     def learn_from_manual_categorization(self, image, main_category, subcategory):
-        # This is a placeholder for future implementation of learning from manual categorizations
-        # In a real-world scenario, you would update the model based on this new information
+        """Placeholder for future implementation of learning from manual categorizations."""
         pass
