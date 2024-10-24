@@ -42,12 +42,15 @@ class Database:
                     ai_category TEXT NOT NULL,
                     ai_subcategory TEXT NOT NULL,
                     ai_confidence FLOAT NOT NULL,
-                    token_usage INTEGER,
-                    image_size INTEGER,
                     user_id INTEGER REFERENCES users(id),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            
+            # Add token_usage and image_size columns if they don't exist
+            cur.execute('ALTER TABLE images ADD COLUMN IF NOT EXISTS token_usage INTEGER')
+            cur.execute('ALTER TABLE images ADD COLUMN IF NOT EXISTS image_size INTEGER')
+            
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS token_usage (
                     id SERIAL PRIMARY KEY,
@@ -71,10 +74,15 @@ class Database:
     def save_image(self, filename, image_data, category, subcategory, user_id, ai_confidence: float, token_usage: int = 0, image_size: int = 0):
         with self.conn.cursor() as cur:
             logger.info(f"Saving image {filename} with category: {category} - {subcategory}")
-            cur.execute("""
-                INSERT INTO images (filename, image_data, category, subcategory, ai_category, ai_subcategory, ai_confidence, user_id, token_usage, image_size)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (filename, image_data, category, subcategory, category, subcategory, ai_confidence, user_id, token_usage, image_size))
+            cur.execute('''
+                INSERT INTO images (
+                    filename, image_data, category, subcategory, 
+                    ai_category, ai_subcategory, ai_confidence, 
+                    user_id, token_usage, image_size
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (filename, image_data, category, subcategory, 
+                  category, subcategory, ai_confidence, user_id, 
+                  token_usage, image_size))
             
             # Update token usage statistics
             today = datetime.now().date()
