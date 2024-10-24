@@ -66,24 +66,21 @@ class Database:
 
     def get_all_images(self):
         with self.conn.cursor() as cur:
-            cur.execute("""
+            cur.execute('''
                 SELECT id, filename, image_data, category, subcategory, user_id
                 FROM images
                 ORDER BY created_at DESC
-            """)
+            ''')
             results = cur.fetchall()
             logger.info(f"Retrieved {len(results)} images from database")
-            return [
-                {
-                    'id': row[0],
-                    'filename': row[1],
-                    'image_data': row[2],
-                    'category': row[3],
-                    'subcategory': row[4],
-                    'user_id': row[5]
-                }
-                for row in cur.fetchall()
-            ]
+            return [{
+                'id': row[0],
+                'filename': row[1],
+                'image_data': row[2],
+                'category': row[3],
+                'subcategory': row[4],
+                'user_id': row[5]
+            } for row in results]
 
     def update_categorization(self, image_id, new_category, new_subcategory):
         with self.conn.cursor() as cur:
