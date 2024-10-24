@@ -195,15 +195,6 @@ def review_page():
                 logger.info(f"Displaying image {image['filename']} with categories: {image['category']} - {image['subcategory']}")
                 st.write(f"Current: {image['category']} - {image['subcategory']}")
                 
-                # Add download button for the image
-                img_bytes = base64.b64decode(image['image_data'])
-                download_button = st.download_button(
-                    label=f"Download {image['filename']}",
-                    data=img_bytes,
-                    file_name=image['filename'],
-                    mime="image/jpeg"
-                )
-                
                 # Use a unique key for each set of buttons
                 button_key = f"buttons_{image['id']}"
                 
@@ -264,12 +255,13 @@ def review_page():
     # Reset buffer position to the beginning
     zip_buffer.seek(0)
     
-    # Add the download button for the zip file
+    # Add the download button for the zip file with a unique key
     st.download_button(
         label="Download All Images (Organized by Category)",
         data=zip_buffer,
         file_name="all_car_images.zip",
-        mime="application/zip"
+        mime="application/zip",
+        key="download_all_images_button"
     )
 
 def statistics_page():
