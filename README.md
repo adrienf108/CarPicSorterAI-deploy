@@ -1,21 +1,31 @@
 # Car Image Categorization Web App - Local Mac Deployment Guide
 
+## Overview
+This application uses AI-powered image recognition to categorize car images into predefined categories and subcategories. It features user authentication, batch upload capabilities, and an advanced analytics dashboard.
+
 ## Prerequisites
 
-1. Install Python 3.11 or later using Homebrew:
+### Software Requirements
+1. Python 3.11 or later:
 ```bash
 brew install python@3.11
 ```
 
-2. Install PostgreSQL using Homebrew:
+2. PostgreSQL 15:
 ```bash
 brew install postgresql@15
 brew services start postgresql@15
 ```
 
+### API Requirements
+- Anthropic API key (for Claude 3 Opus model)
+  - Sign up at https://www.anthropic.com/
+  - Generate an API key from your dashboard
+  - Keep this key secure and never share it
+
 ## Installation Steps
 
-1. Clone the repository to your local machine:
+1. Clone the repository:
 ```bash
 git clone <repository-url>
 cd <repository-name>
@@ -65,35 +75,68 @@ maxUploadSize = 1000
 streamlit run main.py
 ```
 
-2. Access the application in your web browser at:
+2. Access the application:
 ```
 http://localhost:5000
 ```
 
+## Features
+- AI-powered image categorization using Claude 3 Opus
+- User authentication with role-based access
+- Batch upload functionality
+- Advanced analytics dashboard
+- Duplicate image detection
+- Manual review and correction capabilities
+
 ## Important Notes
 
-1. Make sure PostgreSQL is running before starting the application.
-2. Ensure you have a valid Anthropic API key for image recognition functionality.
-3. The first user to register will automatically become an admin.
-4. The application requires sufficient disk space for storing uploaded images.
-
-## Troubleshooting
-
-1. If you encounter database connection issues:
-   - Verify PostgreSQL is running: `brew services list`
-   - Check your database credentials in the `.env` file
-   - Ensure the database exists: `psql -l`
-
-2. If you see import errors:
-   - Verify all dependencies are installed: `pip list`
-   - Check your Python version: `python --version`
-
-3. If the application fails to start:
-   - Check if port 5000 is available: `lsof -i :5000`
-   - Verify all environment variables are set: `env | grep PG`
-
-## Security Notes
-
+### Security
 1. Never share your `.env` file or API keys
 2. Use strong passwords for database access
 3. Keep your Python packages updated for security patches
+4. The first registered user becomes an admin automatically
+
+### Performance
+1. Maximum upload size is set to 1000MB
+2. Batch uploads show progress indicators
+3. Duplicate images are automatically detected and skipped
+
+## Troubleshooting
+
+### Database Issues
+1. Verify PostgreSQL is running:
+```bash
+brew services list
+```
+
+2. Check database existence:
+```bash
+psql -l
+```
+
+3. Test database connection:
+```bash
+psql -h localhost -U your_postgres_username your_database_name
+```
+
+### Application Issues
+1. Import errors:
+   - Verify installations: `pip list`
+   - Check Python version: `python --version`
+
+2. Server issues:
+   - Check port availability: `lsof -i :5000`
+   - Verify environment variables: `env | grep PG`
+
+3. API issues:
+   - Verify Anthropic API key is correctly set
+   - Check API access in environment variables
+
+### Common Solutions
+- Clear browser cache if the interface appears broken
+- Restart the application after configuration changes
+- Ensure sufficient disk space for image storage
+- Check database logs for connection issues
+
+## Support
+For additional support or to report issues, please use the repository's issue tracker.
