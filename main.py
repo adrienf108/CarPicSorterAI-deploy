@@ -208,11 +208,6 @@ def process_zip_file(filename, file_data, user_id):
     finally:
         gc.collect()
 
-@st.cache_data(ttl=300)
-def get_cached_images():
-    """Cache image data for 5 minutes to reduce database load"""
-    return get_db().get_all_images()
-
 def login_page():
     """Handle user login and registration."""
     st.header("Login")
@@ -298,104 +293,156 @@ def upload_page():
         st.session_state['duplicates_count'] = 0
 
 def review_page():
-    """Handle image review and categorization."""
+    """Handle image review and categorization with pagination."""
     st.header("Review and Correct Categorizations")
     
-    images = get_cached_images()
-    logger.info(f"Retrieved {len(images)} images for review")
+    # Get total images and calculate total pages
+    total_images = get_db().get_total_images()
+    page_size = get_db().get_page_size()
+    total_pages = (total_images + page_size - 1) // page_size
     
-    if not images:
+    if total_images == 0:
         st.warning("No images to review.")
         return
-
+    
+    # Pagination controls
+    col1, col2, col3 = st.columns([2, 3, 2])
+    with col2:
+        page_number = st.select_slider(
+            "Page",
+            options=range(1, total_pages + 1),
+            value=st.session_state.get('review_page', 1),
+            key='page_slider'
+        )
+    
+    # Update session state for page number
+    if 'review_page' not in st.session_state or st.session_state.review_page != page_number:
+        st.session_state.review_page = page_number
+        # Clear any previous state for this page
+        for key in list(st.session_state.keys()):
+            if key.startswith('buttons_'):
+                del st.session_state[key]
+    
+    # Get current page of images with caching
+    @st.cache_data(ttl=300)  # Cache for 5 minutes
+    def get_cached_page(page_num):
+        return get_db().get_images_page(page_num)
+    
+    images = get_cached_page(page_number)
+    logger.info(f"Retrieved {len(images)} images for page {page_number}")
+    
+    # Display page information
+    st.write(f"Showing {len(images)} images (Page {page_number} of {total_pages})")
+    
+    # Display images in grid
     cols = st.columns(3)
     for i, image in enumerate(images):
         with cols[i % 3]:
-            with st.container():
-                st.image(base64.b64decode(image['image_data']), use_column_width=True)
-                logger.info(f"Displaying image {image['filename']} with categories: {image['category']} - {image['subcategory']}")
-                st.write(f"Current: {image['category']} - {image['subcategory']}")
-                
-                button_key = f"buttons_{image['id']}"
-                
-                if button_key not in st.session_state:
-                    st.session_state[button_key] = {"state": "main", "selected_category": None}
-                
-                if st.session_state[button_key]["state"] == "main":
-                    st.write("Select Main Category:")
-                    cols_categories = st.columns(3)
-                    for idx, category in enumerate(get_ai_model().model.main_categories + ['Uncategorized']):
-                        with cols_categories[idx % 3]:
-                            if st.button(category, key=f"{button_key}_{category}"):
-                                st.session_state[button_key]["state"] = "sub"
-                                st.session_state[button_key]["selected_category"] = category
-                                st.rerun()
-                
-                elif st.session_state[button_key]["state"] == "sub":
-                    selected_category = st.session_state[button_key]["selected_category"]
-                    if selected_category != 'Uncategorized':
-                        st.write(f"Select Subcategory for {selected_category}:")
-                        cols_subcategories = st.columns(3)
-                        subcategories = get_ai_model().model.subcategories[selected_category]
-                        for idx, subcategory in enumerate(subcategories):
-                            with cols_subcategories[idx % 3]:
-                                if st.button(subcategory, key=f"{button_key}_{subcategory}"):
-                                    get_db().update_categorization(image['id'], selected_category, subcategory)
-                                    get_ai_model().learn_from_manual_categorization(
-                                        Image.open(io.BytesIO(base64.b64decode(image['image_data']))),
-                                        selected_category,
-                                        subcategory
-                                    )
-                                    st.session_state[button_key]["state"] = "main"
+            try:
+                with st.container():
+                    # Decode and display image
+                    img_data = base64.b64decode(image['image_data'])
+                    img = Image.open(io.BytesIO(img_data))
+                    img.thumbnail((300, 300))  # Resize image for display
+                    st.image(img, use_column_width=True)
+                    del img  # Clean up image object
+                    del img_data  # Clean up decoded data
+                    
+                    st.write(f"Current: {image['category']} - {image['subcategory']}")
+                    
+                    button_key = f"buttons_{image['id']}"
+                    
+                    if button_key not in st.session_state:
+                        st.session_state[button_key] = {"state": "main", "selected_category": None}
+                    
+                    if st.session_state[button_key]["state"] == "main":
+                        st.write("Select Main Category:")
+                        cols_categories = st.columns(3)
+                        for idx, category in enumerate(get_ai_model().model.main_categories + ['Uncategorized']):
+                            with cols_categories[idx % 3]:
+                                if st.button(category, key=f"{button_key}_{category}"):
+                                    st.session_state[button_key]["state"] = "sub"
+                                    st.session_state[button_key]["selected_category"] = category
                                     st.rerun()
-                    else:
-                        if st.button("Confirm Uncategorized", key=f"{button_key}_uncategorized"):
-                            get_db().update_categorization(image['id'], 'Uncategorized', 'Uncategorized')
+                    
+                    elif st.session_state[button_key]["state"] == "sub":
+                        selected_category = st.session_state[button_key]["selected_category"]
+                        if selected_category != 'Uncategorized':
+                            st.write(f"Select Subcategory for {selected_category}:")
+                            cols_subcategories = st.columns(3)
+                            subcategories = get_ai_model().model.subcategories[selected_category]
+                            for idx, subcategory in enumerate(subcategories):
+                                with cols_subcategories[idx % 3]:
+                                    if st.button(subcategory, key=f"{button_key}_{subcategory}"):
+                                        get_db().update_categorization(image['id'], selected_category, subcategory)
+                                        # Force cache refresh for this page
+                                        get_cached_page.clear()
+                                        st.session_state[button_key]["state"] = "main"
+                                        st.rerun()
+                        else:
+                            if st.button("Confirm Uncategorized", key=f"{button_key}_uncategorized"):
+                                get_db().update_categorization(image['id'], 'Uncategorized', 'Uncategorized')
+                                # Force cache refresh for this page
+                                get_cached_page.clear()
+                                st.session_state[button_key]["state"] = "main"
+                                st.rerun()
+                        
+                        if st.button("Back", key=f"{button_key}_back"):
                             st.session_state[button_key]["state"] = "main"
                             st.rerun()
-                    
-                    if st.button("Back", key=f"{button_key}_back"):
-                        st.session_state[button_key]["state"] = "main"
-                        st.rerun()
-
+            
+            except Exception as e:
+                logger.error(f"Error displaying image: {str(e)}")
+                st.error("Error displaying image")
+            finally:
+                # Force garbage collection after processing each image
+                gc.collect()
+    
+    # Download functionality
     st.write("---")
     st.subheader("Download All Images")
     
-    zip_buffer = io.BytesIO()
-    
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        file_counter = 1
-        
-        sorted_images = sorted(images, key=lambda x: (
-            CATEGORY_NUMBERS.get(x['category'], '99'),
-            SUBCATEGORY_NUMBERS.get(x['category'], {}).get(x['subcategory'], '99')
-        ))
-        
-        for image in sorted_images:
-            cat_num = CATEGORY_NUMBERS.get(image['category'], '99')
-            subcat_num = SUBCATEGORY_NUMBERS.get(image['category'], {}).get(image['subcategory'], '99')
+    if st.button("Prepare Download"):
+        with st.spinner("Preparing zip file..."):
+            zip_buffer = io.BytesIO()
             
-            _, ext = os.path.splitext(image['filename'])
-            if not ext:
-                ext = '.jpg'
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                file_counter = 1
+                
+                # Get all images for download
+                all_images = []
+                for p in range(1, total_pages + 1):
+                    all_images.extend(get_db().get_images_page(p))
+                
+                sorted_images = sorted(all_images, key=lambda x: (
+                    CATEGORY_NUMBERS.get(x['category'], '99'),
+                    SUBCATEGORY_NUMBERS.get(x['category'], {}).get(x['subcategory'], '99')
+                ))
+                
+                for image in sorted_images:
+                    cat_num = CATEGORY_NUMBERS.get(image['category'], '99')
+                    subcat_num = SUBCATEGORY_NUMBERS.get(image['category'], {}).get(image['subcategory'], '99')
+                    
+                    _, ext = os.path.splitext(image['filename'])
+                    if not ext:
+                        ext = '.jpg'
+                    
+                    filename = f"{cat_num}{subcat_num}_{file_counter:04d}{ext}"
+                    
+                    img_bytes = base64.b64decode(image['image_data'])
+                    zf.writestr(filename, img_bytes)
+                    
+                    file_counter += 1
+                    gc.collect()
             
-            filename = f"{cat_num}{subcat_num}_{file_counter:04d}{ext}"
-            
-            img_bytes = base64.b64decode(image['image_data'])
-            zf.writestr(filename, img_bytes)
-            
-            file_counter += 1
-            gc.collect()
-    
-    zip_buffer.seek(0)
-    
-    st.download_button(
-        label="Download All Images (Organized by Category)",
-        data=zip_buffer,
-        file_name="all_car_images.zip",
-        mime="application/zip",
-        key="download_all_images_button"
-    )
+            zip_buffer.seek(0)
+            st.download_button(
+                label="Download All Images (Organized by Category)",
+                data=zip_buffer,
+                file_name="all_car_images.zip",
+                mime="application/zip",
+                key="download_all_images_button"
+            )
 
 def statistics_page():
     """Display AI performance analytics dashboard."""
