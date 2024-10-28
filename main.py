@@ -30,56 +30,6 @@ CHUNK_SIZE = 5 * 1024 * 1024
 CLEANUP_DAYS_THRESHOLD = 30
 CLEANUP_SIZE_THRESHOLD_MB = 1000
 
-# Category and subcategory number mappings
-CATEGORY_NUMBERS = {
-    'Exterior': '01',
-    'Interior': '02',
-    'Engine': '03',
-    'Undercarriage': '04',
-    'Documents': '05',
-    'Uncategorized': '99'
-}
-
-SUBCATEGORY_NUMBERS = {
-    'Exterior': {
-        '3/4 front view': '01',
-        'Side profile': '02',
-        '3/4 rear view': '03',
-        'Rear view': '04',
-        'Wheels': '05',
-        'Details': '06',
-        'Defects': '07'
-    },
-    'Interior': {
-        'Full interior view': '01',
-        'Dashboard': '02',
-        'Front seats': '03',
-        "Driver's seat": '04',
-        'Rear seats': '05',
-        'Steering wheel': '06',
-        'Gear shift': '07',
-        'Pedals and floor mats': '08',
-        'Gauges/Instrument cluster': '09',
-        'Details': '10',
-        'Trunk/Boot': '11'
-    },
-    'Engine': {
-        'Full view': '01',
-        'Detail': '02'
-    },
-    'Undercarriage': {
-        'Undercarriage': '01'
-    },
-    'Documents': {
-        'Invoices/Receipts': '01',
-        'Service book': '02',
-        'Technical inspections/MOT certificates': '03'
-    },
-    'Uncategorized': {
-        'Uncategorized': '99'
-    }
-}
-
 # Initialize database and AI model (with lazy loading)
 db = None
 ai_model = None
@@ -100,10 +50,16 @@ def clear_previous_session():
     """Clear all temporary files and session data from previous upload sessions"""
     try:
         # Clear session state for upload tracking
-        if 'processed_hashes' in st.session_state:
-            del st.session_state['processed_hashes']
-        if 'duplicates_count' in st.session_state:
-            st.session_state['duplicates_count'] = 0
+        session_keys_to_clear = [
+            'processed_hashes',
+            'duplicates_count',
+            'image_cache',
+            'stats_cache',
+            'last_cleanup'
+        ]
+        for key in session_keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
         
         # Remove all temporary files
         cleanup_temp_files(max_age_minutes=0)  # Clear all temp files regardless of age
@@ -117,6 +73,12 @@ def clear_previous_session():
                         os.remove(os.path.join(temp_dir, filename))
                     except OSError:
                         continue
+        
+        # Clear database cache
+        if hasattr(get_cached_images, 'clear_cache'):
+            get_cached_images.clear_cache()
+        if hasattr(get_cached_statistics, 'clear_cache'):
+            get_cached_statistics.clear_cache()
         
         # Force garbage collection
         gc.collect()
@@ -257,10 +219,10 @@ def check_and_cleanup_uploads():
             st.session_state['last_cleanup'] = datetime.now()
             
             # Clear memory caches
-            if 'image_cache' in st.session_state:
-                del st.session_state['image_cache']
-            if 'stats_cache' in st.session_state:
-                del st.session_state['stats_cache']
+            if hasattr(get_cached_images, 'clear_cache'):
+                get_cached_images.clear_cache()
+            if hasattr(get_cached_statistics, 'clear_cache'):
+                get_cached_statistics.clear_cache()
             gc.collect()
             
     except Exception as e:
@@ -277,8 +239,12 @@ def upload_page():
     if 'upload_session_started' not in st.session_state:
         st.session_state['upload_session_started'] = True
         st.session_state['duplicates_count'] = 0
-        # Clear previous session data and temporary files
+        # Clear previous session data, temporary files, and database entries
         clear_previous_session()
+        if 'user' in st.session_state:
+            cleared_count = get_db().clear_previous_uploads(st.session_state['user'].id)
+            if cleared_count > 0:
+                st.info(f"Cleared {cleared_count} images from your previous upload session.")
     
     # Display warning for duplicate images if any were found
     if st.session_state.get('duplicates_count', 0) > 0:
@@ -288,8 +254,10 @@ def upload_page():
     with st.expander("Storage Status"):
         try:
             with get_db().conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*), SUM(image_size) FROM images")
-                count, total_size = cur.fetchone()
+                cur.execute("SELECT COUNT(*), COALESCE(SUM(image_size), 0) FROM images")
+                result = cur.fetchone()
+                count = result[0] if result else 0
+                total_size = result[1] if result else 0
                 if total_size:
                     total_size_mb = total_size / (1024 * 1024)
                     st.info(f"Current storage: {total_size_mb:.2f}MB used by {count} images")
@@ -339,24 +307,92 @@ def upload_page():
         # Force cleanup check after large uploads
         if total_files > 10:
             st.session_state['last_cleanup'] = datetime.now() - timedelta(days=1)
+        
+        # Explicitly cleanup processed hashes after upload completion
+        if 'processed_hashes' in st.session_state:
+            del st.session_state['processed_hashes']
+            gc.collect()
+
+def login_page():
+    """Handle user login and registration."""
+    st.header("Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Login"):
+            user = get_db().get_user_by_username(username)
+            if user and bcrypt.checkpw(password.encode('utf-8'), user[2].encode('utf-8')):
+                st.session_state['user'] = User(user[0], user[1], user[3])
+                st.success("Logged in successfully!")
+                st.rerun()
+            else:
+                st.error("Invalid username or password")
+    
+    with col2:
+        if st.button("Register"):
+            if username and password:
+                existing_user = get_db().get_user_by_username(username)
+                if existing_user:
+                    st.error("Username already exists")
+                else:
+                    user_count = len(get_db().get_all_users())
+                    role = 'admin' if user_count == 0 else 'user'
+                    user_id = get_db().create_user(username, password, role)
+                    st.session_state['user'] = User(user_id, username, role)
+                    st.success("Registered successfully!")
+                    st.rerun()
+            else:
+                st.error("Please enter both username and password")
 
 def review_page():
     """Handle image review and categorization."""
     st.header("Review and Correct Categorizations")
     
     images = get_cached_images()
-    logger.info(f"Retrieved {len(images)} images for review")
-    
     if not images:
         st.warning("No images to review.")
         return
-
+    
+    # Display images in a paginated grid
+    images_per_page = 9
+    total_pages = (len(images) + images_per_page - 1) // images_per_page
+    
+    if 'review_page_number' not in st.session_state:
+        st.session_state['review_page_number'] = 0
+        
+    page_number = st.session_state['review_page_number']
+    
+    # Navigation buttons
+    col1, col2, col3 = st.columns([1, 3, 1])
+    with col1:
+        if st.button("Previous", disabled=page_number == 0):
+            st.session_state['review_page_number'] -= 1
+            st.rerun()
+    with col2:
+        st.write(f"Page {page_number + 1} of {total_pages}")
+    with col3:
+        if st.button("Next", disabled=page_number >= total_pages - 1):
+            st.session_state['review_page_number'] += 1
+            st.rerun()
+            
+    # Get current page's images
+    start_idx = page_number * images_per_page
+    end_idx = min(start_idx + images_per_page, len(images))
+    current_images = images[start_idx:end_idx]
+    
+    # Display images in a 3x3 grid
     cols = st.columns(3)
-    for i, image in enumerate(images):
+    for i, image in enumerate(current_images):
         with cols[i % 3]:
             with st.container():
-                st.image(base64.b64decode(image['image_data']), use_column_width=True)
-                logger.info(f"Displaying image {image['filename']} with categories: {image['category']} - {image['subcategory']}")
+                # Load and resize image for display
+                img_data = base64.b64decode(image['image_data'])
+                with Image.open(io.BytesIO(img_data)) as img:
+                    img.thumbnail((300, 300))
+                    st.image(img, use_column_width=True)
+                    
                 st.write(f"Current: {image['category']} - {image['subcategory']}")
                 
                 button_key = f"buttons_{image['id']}"
@@ -365,32 +401,22 @@ def review_page():
                     st.session_state[button_key] = {"state": "main", "selected_category": None}
                 
                 if st.session_state[button_key]["state"] == "main":
-                    st.write("Select Main Category:")
-                    cols_categories = st.columns(3)
-                    for idx, category in enumerate(get_ai_model().model.main_categories + ['Uncategorized']):
-                        with cols_categories[idx % 3]:
-                            if st.button(category, key=f"{button_key}_{category}"):
-                                st.session_state[button_key]["state"] = "sub"
-                                st.session_state[button_key]["selected_category"] = category
-                                st.rerun()
+                    for category in get_ai_model().model.main_categories + ['Uncategorized']:
+                        if st.button(category, key=f"{button_key}_{category}"):
+                            st.session_state[button_key]["state"] = "sub"
+                            st.session_state[button_key]["selected_category"] = category
+                            st.rerun()
                 
                 elif st.session_state[button_key]["state"] == "sub":
                     selected_category = st.session_state[button_key]["selected_category"]
                     if selected_category != 'Uncategorized':
                         st.write(f"Select Subcategory for {selected_category}:")
-                        cols_subcategories = st.columns(3)
                         subcategories = get_ai_model().model.subcategories[selected_category]
-                        for idx, subcategory in enumerate(subcategories):
-                            with cols_subcategories[idx % 3]:
-                                if st.button(subcategory, key=f"{button_key}_{subcategory}"):
-                                    get_db().update_categorization(image['id'], selected_category, subcategory)
-                                    get_ai_model().learn_from_manual_categorization(
-                                        Image.open(io.BytesIO(base64.b64decode(image['image_data']))),
-                                        selected_category,
-                                        subcategory
-                                    )
-                                    st.session_state[button_key]["state"] = "main"
-                                    st.rerun()
+                        for subcategory in subcategories:
+                            if st.button(subcategory, key=f"{button_key}_{subcategory}"):
+                                get_db().update_categorization(image['id'], selected_category, subcategory)
+                                st.session_state[button_key]["state"] = "main"
+                                st.rerun()
                     else:
                         if st.button("Confirm Uncategorized", key=f"{button_key}_uncategorized"):
                             get_db().update_categorization(image['id'], 'Uncategorized', 'Uncategorized')
@@ -400,45 +426,6 @@ def review_page():
                     if st.button("Back", key=f"{button_key}_back"):
                         st.session_state[button_key]["state"] = "main"
                         st.rerun()
-
-    st.write("---")
-    st.subheader("Download All Images")
-    
-    zip_buffer = io.BytesIO()
-    
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        file_counter = 1
-        
-        sorted_images = sorted(images, key=lambda x: (
-            CATEGORY_NUMBERS.get(x['category'], '99'),
-            SUBCATEGORY_NUMBERS.get(x['category'], {}).get(x['subcategory'], '99')
-        ))
-        
-        for image in sorted_images:
-            cat_num = CATEGORY_NUMBERS.get(image['category'], '99')
-            subcat_num = SUBCATEGORY_NUMBERS.get(image['category'], {}).get(image['subcategory'], '99')
-            
-            _, ext = os.path.splitext(image['filename'])
-            if not ext:
-                ext = '.jpg'
-            
-            filename = f"{cat_num}{subcat_num}_{file_counter:04d}{ext}"
-            
-            img_bytes = base64.b64decode(image['image_data'])
-            zf.writestr(filename, img_bytes)
-            
-            file_counter += 1
-            gc.collect()
-    
-    zip_buffer.seek(0)
-    
-    st.download_button(
-        label="Download All Images (Organized by Category)",
-        data=zip_buffer,
-        file_name="all_car_images.zip",
-        mime="application/zip",
-        key="download_all_images_button"
-    )
 
 def statistics_page():
     """Display AI performance analytics dashboard."""
@@ -542,39 +529,6 @@ def statistics_page():
     st.plotly_chart(fig, use_container_width=True)
     del confidence_df
     gc.collect()
-
-def login_page():
-    """Handle user login and registration."""
-    st.header("Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Login"):
-            user = get_db().get_user_by_username(username)
-            if user and bcrypt.checkpw(password.encode('utf-8'), user[2].encode('utf-8')):
-                st.session_state['user'] = User(user[0], user[1], user[3])
-                st.success("Logged in successfully!")
-                st.rerun()
-            else:
-                st.error("Invalid username or password")
-    
-    with col2:
-        if st.button("Register"):
-            if username and password:
-                existing_user = get_db().get_user_by_username(username)
-                if existing_user:
-                    st.error("Username already exists")
-                else:
-                    user_count = len(get_db().get_all_users())
-                    role = 'admin' if user_count == 0 else 'user'
-                    user_id = get_db().create_user(username, password, role)
-                    st.session_state['user'] = User(user_id, username, role)
-                    st.success("Registered successfully!")
-                    st.rerun()
-            else:
-                st.error("Please enter both username and password")
 
 def user_management_page():
     """Handle user management for administrators."""

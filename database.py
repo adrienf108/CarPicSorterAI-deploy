@@ -44,14 +44,11 @@ class Database:
                     ai_confidence FLOAT NOT NULL,
                     user_id INTEGER REFERENCES users(id),
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_accessed TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    last_accessed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    token_usage INTEGER,
+                    image_size INTEGER
                 )
             ''')
-            
-            # Add token_usage and image_size columns if they don't exist
-            cur.execute('ALTER TABLE images ADD COLUMN IF NOT EXISTS token_usage INTEGER')
-            cur.execute('ALTER TABLE images ADD COLUMN IF NOT EXISTS image_size INTEGER')
-            cur.execute('ALTER TABLE images ADD COLUMN IF NOT EXISTS last_accessed TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
             
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS token_usage (
@@ -65,6 +62,25 @@ class Database:
             ''')
         self.conn.commit()
 
+    def clear_previous_uploads(self, user_id):
+        """Clear all previous uploads for a user when starting a new session"""
+        try:
+            with self.conn.cursor() as cur:
+                # Delete all images uploaded by the user
+                cur.execute("""
+                    DELETE FROM images 
+                    WHERE user_id = %s
+                    RETURNING id, filename
+                """, (user_id,))
+                deleted = cur.fetchall()
+                self.conn.commit()
+                logger.info(f"Cleared {len(deleted)} previous uploads for user {user_id}")
+                return len(deleted)
+        except Exception as e:
+            logger.error(f"Error clearing previous uploads: {str(e)}")
+            self.conn.rollback()
+            return 0
+
     def get_user_by_username(self, username):
         try:
             with self.conn.cursor() as cur:
@@ -73,7 +89,8 @@ class Database:
                     FROM users 
                     WHERE username = %s
                 ''', (username,))
-                return cur.fetchone()
+                result = cur.fetchone()
+                return result if result else None
         except Exception as e:
             logger.error(f"Error getting user by username: {str(e)}")
             return None
@@ -88,12 +105,11 @@ class Database:
                     WHERE created_at < NOW() - INTERVAL '%s days'
                     RETURNING id, filename
                 """, (days_threshold,))
-                old_deleted = cur.fetchall()
+                old_deleted = cur.fetchall() or []
                 
                 # Calculate total size
-                cur.execute("SELECT SUM(image_size) FROM images")
-                result = cur.fetchone()
-                total_size = result[0] if result and result[0] is not None else 0
+                cur.execute("SELECT COALESCE(SUM(image_size), 0) FROM images")
+                total_size = cur.fetchone()[0] or 0
                 total_size_mb = total_size / (1024 * 1024)  # Convert to MB
                 
                 # If still over threshold, delete least recently accessed images
@@ -110,7 +126,7 @@ class Database:
                         )
                         RETURNING id, filename
                     """)
-                    size_deleted = cur.fetchall()
+                    size_deleted = cur.fetchall() or []
                 else:
                     size_deleted = []
                 
@@ -167,7 +183,7 @@ class Database:
                 FROM images
                 ORDER BY created_at DESC
             ''')
-            results = cur.fetchall()
+            results = cur.fetchall() or []
             logger.info(f"Retrieved {len(results)} images from database")
             return [{
                 'id': row[0],
@@ -191,15 +207,15 @@ class Database:
     def get_statistics(self):
         with self.conn.cursor() as cur:
             # Get total images count
-            cur.execute("SELECT COUNT(*) FROM images")
-            total_images = cur.fetchone()[0] or 0
+            cur.execute("SELECT COALESCE(COUNT(*), 0) FROM images")
+            total_images = cur.fetchone()[0]
 
             # Get correct predictions count
             cur.execute("""
-                SELECT COUNT(*) FROM images
+                SELECT COALESCE(COUNT(*), 0) FROM images
                 WHERE category = ai_category AND subcategory = ai_subcategory
             """)
-            correct_predictions = cur.fetchone()[0] or 0
+            correct_predictions = cur.fetchone()[0]
             accuracy = (correct_predictions / total_images * 100) if total_images > 0 else 0
 
             # Get category distribution
@@ -209,7 +225,7 @@ class Database:
                 GROUP BY category
                 ORDER BY count DESC
             """)
-            category_distribution = [{'category': row[0], 'count': row[1]} for row in cur.fetchall()]
+            category_distribution = [{'category': row[0], 'count': row[1]} for row in cur.fetchall() or []]
 
             # Get accuracy over time
             cur.execute("""
@@ -219,7 +235,7 @@ class Database:
                 GROUP BY DATE(created_at)
                 ORDER BY date
             """)
-            accuracy_over_time = [{'date': row[0], 'accuracy': row[1]} for row in cur.fetchall()]
+            accuracy_over_time = [{'date': row[0], 'accuracy': row[1]} for row in cur.fetchall() or []]
 
             # Get confusion matrix data
             cur.execute("""
@@ -227,7 +243,7 @@ class Database:
                 FROM images
                 GROUP BY ai_category, category
             """)
-            confusion_data = cur.fetchall()
+            confusion_data = cur.fetchall() or []
             categories = sorted(set(row[0] for row in confusion_data) | set(row[1] for row in confusion_data))
             confusion_matrix = np.zeros((len(categories), len(categories)), dtype=int)
             category_to_index = {cat: i for i, cat in enumerate(categories)}
@@ -248,7 +264,7 @@ class Database:
             """)
             top_misclassifications = [
                 {'Predicted': row[0], 'Actual': row[1], 'Count': row[2]}
-                for row in cur.fetchall()
+                for row in cur.fetchall() or []
             ]
 
             # Get confidence distribution
@@ -256,7 +272,7 @@ class Database:
                 SELECT ai_confidence
                 FROM images
             """)
-            confidence_distribution = [{'confidence': row[0]} for row in cur.fetchall()]
+            confidence_distribution = [{'confidence': row[0]} for row in cur.fetchall() or []]
 
             # Get token usage statistics
             token_stats = self.get_token_usage_stats()
@@ -277,7 +293,7 @@ class Database:
         with self.conn.cursor() as cur:
             # Get total token usage
             cur.execute("SELECT COALESCE(SUM(total_tokens), 0) FROM token_usage")
-            total_tokens = cur.fetchone()[0] or 0
+            total_tokens = cur.fetchone()[0]
 
             # Get token usage over time
             cur.execute("""
@@ -292,16 +308,15 @@ class Database:
                     'images': row[2],
                     'size': row[3]
                 }
-                for row in cur.fetchall()
-            ] if cur.rowcount > 0 else []
+                for row in cur.fetchall() or []
+            ]
 
             # Get average tokens per image
             cur.execute("""
-                SELECT 
-                    COALESCE(SUM(total_tokens)::float / NULLIF(SUM(total_images), 0), 0)
+                SELECT COALESCE(SUM(total_tokens)::float / NULLIF(SUM(total_images), 0), 0)
                 FROM token_usage
             """)
-            avg_tokens_per_image = cur.fetchone()[0] or 0
+            avg_tokens_per_image = cur.fetchone()[0]
 
             return {
                 'total_tokens': total_tokens,
@@ -311,15 +326,21 @@ class Database:
 
     def create_user(self, username, password, role='user'):
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-        with self.conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO users (username, password_hash, role)
-                VALUES (%s, %s, %s)
-                RETURNING id
-            """, (username, hashed_password.decode('utf-8'), role))
-            user_id = cur.fetchone()[0]
-        self.conn.commit()
-        return user_id
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO users (username, password_hash, role)
+                    VALUES (%s, %s, %s)
+                    RETURNING id
+                """, (username, hashed_password.decode('utf-8'), role))
+                result = cur.fetchone()
+                user_id = result[0] if result else None
+                self.conn.commit()
+                return user_id
+        except Exception as e:
+            logger.error(f"Error creating user: {str(e)}")
+            self.conn.rollback()
+            return None
 
     def update_user_role(self, user_id, new_role):
         with self.conn.cursor() as cur:
@@ -329,4 +350,5 @@ class Database:
     def get_all_users(self):
         with self.conn.cursor() as cur:
             cur.execute("SELECT id, username, role FROM users")
-            return [{'id': row[0], 'username': row[1], 'role': row[2]} for row in cur.fetchall()]
+            results = cur.fetchall() or []
+            return [{'id': row[0], 'username': row[1], 'role': row[2]} for row in results]
