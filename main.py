@@ -9,7 +9,7 @@ import base64
 import zipfile
 from database import Database
 from ai_model import AIModel
-from image_utils import image_to_base64
+from image_utils import image_to_base64, resize_and_compress_image
 import bcrypt
 import hashlib
 import numpy as np
@@ -89,7 +89,7 @@ def calculate_image_hash(image):
     # Convert image to grayscale for more consistent hashing
     img_gray = image.convert('L')
     # Resize to small size (8x8) to focus on major features
-    img_small = img_gray.resize((8, 8), Image.Resampling.LANCZOS)
+    img_small = img_gray.resize((8, 8), Image.LANCZOS)
     # Get raw pixel data
     pixels = list(img_small.getdata())
     # Calculate average pixel value
@@ -98,6 +98,21 @@ def calculate_image_hash(image):
     bits = ''.join(['1' if pixel > avg else '0' for pixel in pixels])
     # Convert binary to hexadecimal
     return hex(int(bits, 2))[2:].zfill(16)
+
+def cleanup_temp_files():
+    """Clean up temporary files in /tmp directory"""
+    temp_dir = "/tmp"
+    for filename in os.listdir(temp_dir):
+        if filename.endswith(".partial"):
+            try:
+                os.remove(os.path.join(temp_dir, filename))
+            except:
+                pass
+
+def check_image_size(image_data):
+    """Check if image size is within limits"""
+    size_mb = len(image_data) / (1024 * 1024)
+    return size_mb <= 10  # 10MB limit per image
 
 def process_chunk(chunk, filename, total_chunks, chunk_number, user_id):
     """Process a single chunk of file data"""
@@ -137,6 +152,12 @@ def process_chunk(chunk, filename, total_chunks, chunk_number, user_id):
 
 def process_single_image(filename, file_data, user_id):
     try:
+        # Check file size before processing
+        if not check_image_size(file_data):
+            logger.warning(f"File {filename} exceeds size limit of 10MB")
+            st.warning(f"Skipping {filename}: File size exceeds 10MB limit")
+            return
+
         img = Image.open(io.BytesIO(file_data))
         img_hash = calculate_image_hash(img)
         
@@ -161,12 +182,18 @@ def process_single_image(filename, file_data, user_id):
         
         st.session_state['processed_hashes'].add(img_hash)
         
+        # Get AI predictions
         main_category, subcategory, confidence, token_usage, image_size = ai_model.predict(img)
         logger.info(f"AI Model prediction for {filename}: {main_category} - {subcategory} (Confidence: {confidence})")
         
-        image_data = image_to_base64(img)
+        # Compress and resize image before saving
+        compressed_image_data = resize_and_compress_image(img)
+        image_data = base64.b64encode(compressed_image_data).decode()
+        
+        # Save to database
         db.save_image(filename, image_data, main_category, subcategory, user_id, float(confidence), token_usage, image_size, img_hash)
         
+        # Display preview
         display_image = img.copy()
         display_image.thumbnail((300, 300))
         
@@ -226,6 +253,9 @@ def login_page():
 def upload_page():
     st.header("Upload Car Images")
     
+    # Clean up any leftover temporary files
+    cleanup_temp_files()
+    
     # Move duplicates warning to a more prominent position
     if 'duplicates_count' in st.session_state and st.session_state['duplicates_count'] > 0:
         st.warning(f"⚠️ {st.session_state['duplicates_count']} duplicate image(s) were detected and automatically skipped.")
@@ -273,7 +303,10 @@ def upload_page():
             except Exception as e:
                 logger.error(f"Error processing file {uploaded_file.name}: {str(e)}")
                 st.error(f"Error processing file {uploaded_file.name}: {str(e)}")
-                
+        
+        # Clean up any remaining temporary files
+        cleanup_temp_files()
+        
         progress_text.text("Upload complete!")
         progress_bar.progress(1.0)
         st.success(f"Successfully processed {total_files} files!")
