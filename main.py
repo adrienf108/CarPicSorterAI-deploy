@@ -85,8 +85,19 @@ class User:
         self.role = role
 
 def calculate_image_hash(image):
-    """Calculate a hash for the image to detect duplicates."""
-    return hashlib.md5(image.tobytes()).hexdigest()
+    """Calculate a perceptual hash for the image to detect duplicates."""
+    # Convert image to grayscale for more consistent hashing
+    img_gray = image.convert('L')
+    # Resize to small size (8x8) to focus on major features
+    img_small = img_gray.resize((8, 8), Image.LANCZOS)
+    # Get raw pixel data
+    pixels = list(img_small.getdata())
+    # Calculate average pixel value
+    avg = sum(pixels) / len(pixels)
+    # Create binary hash
+    bits = ''.join(['1' if pixel > avg else '0' for pixel in pixels])
+    # Convert binary to hexadecimal
+    return hex(int(bits, 2))[2:].zfill(16)
 
 def process_chunk(chunk, filename, total_chunks, chunk_number, user_id):
     """Process a single chunk of file data"""
@@ -130,21 +141,28 @@ def process_single_image(filename, file_data, user_id):
         img = Image.open(io.BytesIO(file_data))
         img_hash = calculate_image_hash(img)
         
-        # Check for duplicates
+        # Initialize processed_hashes in session state if not exists
         if 'processed_hashes' not in st.session_state:
             st.session_state['processed_hashes'] = set()
-            
+            # Get existing hashes from database
+            with db.conn.cursor() as cur:
+                cur.execute('SELECT DISTINCT image_hash FROM images')
+                existing_hashes = cur.fetchall()
+                st.session_state['processed_hashes'].update([h[0] for h in existing_hashes if h[0]])
+        
+        # Check for duplicates
         if img_hash in st.session_state['processed_hashes']:
             st.session_state['duplicates_count'] = st.session_state.get('duplicates_count', 0) + 1
+            logger.info(f"Duplicate image detected: {filename}")
             return
-            
+        
         st.session_state['processed_hashes'].add(img_hash)
         
         main_category, subcategory, confidence, token_usage, image_size = ai_model.predict(img)
         logger.info(f"AI Model prediction for {filename}: {main_category} - {subcategory} (Confidence: {confidence})")
         
         image_data = image_to_base64(img)
-        db.save_image(filename, image_data, main_category, subcategory, user_id, float(confidence), token_usage, image_size)
+        db.save_image(filename, image_data, main_category, subcategory, user_id, float(confidence), token_usage, image_size, img_hash)
         
         display_image = img.copy()
         display_image.thumbnail((300, 300))
