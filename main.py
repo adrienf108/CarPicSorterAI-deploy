@@ -15,10 +15,14 @@ import hashlib
 import numpy as np
 import logging
 import os
+import math
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Set chunk size to 5MB
+CHUNK_SIZE = 5 * 1024 * 1024
 
 # Category and subcategory number mappings
 CATEGORY_NUMBERS = {
@@ -84,6 +88,88 @@ def calculate_image_hash(image):
     """Calculate a hash for the image to detect duplicates."""
     return hashlib.md5(image.tobytes()).hexdigest()
 
+def process_chunk(chunk, filename, total_chunks, chunk_number, user_id):
+    """Process a single chunk of file data"""
+    logger.info(f"Processing chunk {chunk_number}/{total_chunks} for {filename}")
+    
+    try:
+        # If this is the first chunk, create a new file
+        mode = 'ab' if chunk_number > 1 else 'wb'
+        temp_path = f"/tmp/{filename}.partial"
+        
+        with open(temp_path, mode) as f:
+            f.write(chunk)
+        
+        # If this is the last chunk, process the complete file
+        if chunk_number == total_chunks:
+            with open(temp_path, 'rb') as f:
+                file_data = f.read()
+            
+            # Clean up temporary file
+            os.remove(temp_path)
+            
+            # Process the file based on its type
+            if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+                process_single_image(filename, file_data, user_id)
+            elif filename.lower().endswith('.zip'):
+                process_zip_file(filename, file_data, user_id)
+            
+            return True
+        
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error processing chunk: {str(e)}")
+        if os.path.exists(f"/tmp/{filename}.partial"):
+            os.remove(f"/tmp/{filename}.partial")
+        return False
+
+def process_single_image(filename, file_data, user_id):
+    """Process a single image file"""
+    try:
+        img = Image.open(io.BytesIO(file_data))
+        img_hash = calculate_image_hash(img)
+        
+        # Check for duplicates
+        if 'processed_hashes' not in st.session_state:
+            st.session_state['processed_hashes'] = set()
+            
+        if img_hash in st.session_state['processed_hashes']:
+            st.session_state['duplicates_count'] = st.session_state.get('duplicates_count', 0) + 1
+            return
+            
+        st.session_state['processed_hashes'].add(img_hash)
+        
+        main_category, subcategory, confidence, token_usage, image_size = ai_model.predict(img)
+        logger.info(f"AI Model prediction for {filename}: {main_category} - {subcategory} (Confidence: {confidence})")
+        
+        image_data = image_to_base64(img)
+        db.save_image(filename, image_data, main_category, subcategory, user_id, float(confidence), token_usage, image_size)
+        
+        display_image = img.copy()
+        display_image.thumbnail((300, 300))
+        
+        if main_category == 'Uncategorized':
+            st.image(display_image, caption=f"{filename}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
+        else:
+            st.image(display_image, caption=f"{filename}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
+            
+    except Exception as e:
+        logger.error(f"Error processing image {filename}: {str(e)}")
+        st.error(f"Error processing image {filename}: {str(e)}")
+
+def process_zip_file(filename, file_data, user_id):
+    """Process a zip file containing images"""
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_data)) as z:
+            for filename in z.namelist():
+                if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and not filename.startswith('__MACOSX/'):
+                    with z.open(filename) as file:
+                        process_single_image(filename, file.read(), user_id)
+    except Exception as e:
+        logger.error(f"Error processing zip file {filename}: {str(e)}")
+        st.error(f"Error processing zip file {filename}: {str(e)}")
+
 def login_page():
     st.header("Login")
     username = st.text_input("Username")
@@ -127,71 +213,40 @@ def upload_page():
         st.warning(f"Skipped {st.session_state['duplicates_count']} duplicate image(s) in the previous upload.")
     
     uploaded_files = st.file_uploader("Choose images or zip files to upload", type=["jpg", "jpeg", "png", "zip"], accept_multiple_files=True)
-
+    
     if uploaded_files:
-        all_images = []
-        image_hashes = set()
-        duplicates_count = 0
-
-        for uploaded_file in uploaded_files:
-            if uploaded_file.type == "application/zip":
-                with zipfile.ZipFile(uploaded_file) as z:
-                    for filename in z.namelist():
-                        if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and not filename.startswith('__MACOSX/'):
-                            with z.open(filename) as file:
-                                try:
-                                    img_data = file.read()
-                                    img = Image.open(io.BytesIO(img_data))
-                                    img_hash = calculate_image_hash(img)
-                                    if img_hash not in image_hashes:
-                                        image_hashes.add(img_hash)
-                                        all_images.append((filename, img))
-                                    else:
-                                        duplicates_count += 1
-                                except Exception as e:
-                                    st.warning(f"Skipped file {filename}: {str(e)}")
-            else:
-                img = Image.open(uploaded_file)
-                img_hash = calculate_image_hash(img)
-                if img_hash not in image_hashes:
-                    image_hashes.add(img_hash)
-                    all_images.append((uploaded_file.name, img))
-                else:
-                    duplicates_count += 1
-
-        total_files = len(all_images)
+        progress_text = st.empty()
         progress_bar = st.progress(0)
-        status_text = st.empty()
-
-        for i, (filename, image) in enumerate(all_images):
-            upload_progress = (i + 0.5) / total_files
-            progress_bar.progress(upload_progress)
-            status_text.text(f"Uploading and processing {i+1}/{total_files} images")
-
-            main_category, subcategory, confidence, token_usage, image_size = ai_model.predict(image)
-            logger.info(f"AI Model prediction for {filename}: {main_category} - {subcategory} (Confidence: {confidence})")
-
-            image_data = image_to_base64(image)
-            db.save_image(filename, image_data, main_category, subcategory, st.session_state['user'].id, float(confidence), token_usage, image_size)
-            logger.info(f"Saved image {filename} to database with categories: {main_category} - {subcategory}")
-
-            display_image = image.copy()
-            display_image.thumbnail((300, 300))
-
-            if main_category == 'Uncategorized':
-                st.image(display_image, caption=f"{filename}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
-            else:
-                st.image(display_image, caption=f"{filename}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
-
-            process_progress = (i + 1) / total_files
-            progress_bar.progress(process_progress)
-            status_text.text(f"Processed {i+1}/{total_files} images")
-
-        st.session_state['duplicates_count'] = duplicates_count
-
-        st.success(f"Successfully uploaded and processed {total_files} images!")
-        if duplicates_count > 0:
-            st.info(f"Skipped {duplicates_count} duplicate image(s) during this upload.")
+        total_files = len(uploaded_files)
+        
+        for i, uploaded_file in enumerate(uploaded_files):
+            try:
+                file_size = len(uploaded_file.getvalue())
+                total_chunks = math.ceil(file_size / CHUNK_SIZE)
+                
+                progress_text.text(f"Processing file {i+1}/{total_files}: {uploaded_file.name}")
+                
+                # Process file in chunks
+                uploaded_file.seek(0)
+                for chunk_number in range(1, total_chunks + 1):
+                    chunk = uploaded_file.read(CHUNK_SIZE)
+                    is_complete = process_chunk(chunk, uploaded_file.name, total_chunks, chunk_number, st.session_state['user'].id)
+                    
+                    # Update progress
+                    chunk_progress = (chunk_number / total_chunks)
+                    total_progress = ((i + chunk_progress) / total_files)
+                    progress_bar.progress(total_progress)
+                    
+                    if is_complete:
+                        logger.info(f"Completed processing {uploaded_file.name}")
+                
+            except Exception as e:
+                logger.error(f"Error processing file {uploaded_file.name}: {str(e)}")
+                st.error(f"Error processing file {uploaded_file.name}: {str(e)}")
+                
+        progress_text.text("Upload complete!")
+        progress_bar.progress(1.0)
+        st.success(f"Successfully processed {total_files} files!")
 
 def review_page():
     st.header("Review and Correct Categorizations")
