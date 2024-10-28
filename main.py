@@ -89,7 +89,7 @@ def calculate_image_hash(image):
     # Convert image to grayscale for more consistent hashing
     img_gray = image.convert('L')
     # Resize to small size (8x8) to focus on major features
-    img_small = img_gray.resize((8, 8), Image.LANCZOS)
+    img_small = img_gray.resize((8, 8), Image.Resampling.LANCZOS)
     # Get raw pixel data
     pixels = list(img_small.getdata())
     # Calculate average pixel value
@@ -136,7 +136,6 @@ def process_chunk(chunk, filename, total_chunks, chunk_number, user_id):
         return False
 
 def process_single_image(filename, file_data, user_id):
-    """Process a single image file"""
     try:
         img = Image.open(io.BytesIO(file_data))
         img_hash = calculate_image_hash(img)
@@ -153,6 +152,10 @@ def process_single_image(filename, file_data, user_id):
         # Check for duplicates
         if img_hash in st.session_state['processed_hashes']:
             st.session_state['duplicates_count'] = st.session_state.get('duplicates_count', 0) + 1
+            # Track duplicate filename
+            if 'duplicate_filenames' not in st.session_state:
+                st.session_state['duplicate_filenames'] = []
+            st.session_state['duplicate_filenames'].append(filename)
             logger.info(f"Duplicate image detected: {filename}")
             return
         
@@ -223,12 +226,21 @@ def login_page():
 def upload_page():
     st.header("Upload Car Images")
     
-    # Reset duplicates_count at the beginning of the function
-    st.session_state['duplicates_count'] = 0
-    
-    # Display warning message if there were duplicate images skipped in the previous upload
+    # Move duplicates warning to a more prominent position
     if 'duplicates_count' in st.session_state and st.session_state['duplicates_count'] > 0:
-        st.warning(f"Skipped {st.session_state['duplicates_count']} duplicate image(s) in the previous upload.")
+        st.warning(f"⚠️ {st.session_state['duplicates_count']} duplicate image(s) were detected and automatically skipped.")
+        # Add details about duplicates
+        if 'duplicate_filenames' not in st.session_state:
+            st.session_state['duplicate_filenames'] = []
+        if st.session_state['duplicate_filenames']:
+            with st.expander("View skipped duplicates"):
+                for filename in st.session_state['duplicate_filenames']:
+                    st.text(f"- {filename}")
+    
+    # Reset duplicates tracking at the start of new upload
+    if 'uploaded_files' not in st.session_state:
+        st.session_state['duplicates_count'] = 0
+        st.session_state['duplicate_filenames'] = []
     
     uploaded_files = st.file_uploader("Choose images or zip files to upload", type=["jpg", "jpeg", "png", "zip"], accept_multiple_files=True)
     
