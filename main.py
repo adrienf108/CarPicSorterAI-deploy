@@ -75,10 +75,10 @@ def clear_previous_session():
                         continue
         
         # Clear database cache
-        if hasattr(get_cached_images, 'clear_cache'):
-            get_cached_images.clear_cache()
-        if hasattr(get_cached_statistics, 'clear_cache'):
-            get_cached_statistics.clear_cache()
+        if 'get_cached_images' in st.session_state:
+            st.session_state.pop('get_cached_images')
+        if 'get_cached_statistics' in st.session_state:
+            st.session_state.pop('get_cached_statistics')
         
         # Force garbage collection
         gc.collect()
@@ -219,10 +219,10 @@ def check_and_cleanup_uploads():
             st.session_state['last_cleanup'] = datetime.now()
             
             # Clear memory caches
-            if hasattr(get_cached_images, 'clear_cache'):
-                get_cached_images.clear_cache()
-            if hasattr(get_cached_statistics, 'clear_cache'):
-                get_cached_statistics.clear_cache()
+            if 'get_cached_images' in st.session_state:
+                st.session_state.pop('get_cached_images')
+            if 'get_cached_statistics' in st.session_state:
+                st.session_state.pop('get_cached_statistics')
             gc.collect()
             
     except Exception as e:
@@ -545,13 +545,13 @@ def user_management_page():
 
 def main():
     """Main application entry point."""
-    # Clean up any old temporary files and force garbage collection
-    cleanup_temp_files()
-    gc.collect()
-    
     # Initialize session state for page navigation if not exists
     if 'page' not in st.session_state:
         st.session_state['page'] = 'Upload'
+    
+    # Clean up any old temporary files and force garbage collection
+    cleanup_temp_files()
+    gc.collect()
 
     # Check if user is logged in
     if 'user' not in st.session_state or not st.session_state['user']:
@@ -572,17 +572,24 @@ def main():
             st.session_state['page'] = selected_page
             st.rerun()
 
-        # Display the selected page
-        if st.session_state['page'] == "Upload":
-            upload_page()
-        elif st.session_state['page'] == "Review":
-            review_page()
-        elif st.session_state['page'] == "Statistics":
-            statistics_page()
-        elif st.session_state['page'] == "User Management" and st.session_state['user'].role == 'admin':
-            user_management_page()
-        else:
-            st.warning("You don't have permission to access this page.")
+        try:
+            # Display the selected page
+            if st.session_state['page'] == "Upload":
+                upload_page()
+            elif st.session_state['page'] == "Review":
+                review_page()
+            elif st.session_state['page'] == "Statistics":
+                statistics_page()
+            elif st.session_state['page'] == "User Management" and st.session_state['user'].role == 'admin':
+                user_management_page()
+            else:
+                st.warning("You don't have permission to access this page.")
+        except Exception as e:
+            st.error(f"Error loading page: {str(e)}")
+            logger.error(f"Page loading error: {str(e)}")
+            
+            if st.button("Refresh Page"):
+                st.rerun()
 
         if st.sidebar.button("Logout"):
             st.session_state['user'] = None
