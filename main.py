@@ -249,6 +249,7 @@ def upload_page():
     if 'upload_session_started' not in st.session_state:
         st.session_state['upload_session_started'] = True
         st.session_state['duplicates_count'] = 0
+        st.session_state['processed_hashes'] = set()
     
     # Display warning for duplicate images if any were found
     if st.session_state.get('duplicates_count', 0) > 0:
@@ -286,11 +287,23 @@ def upload_page():
             # Update progress
             progress = (i + 1) / total_files
             progress_bar.progress(progress)
-            
+        
         st.success("Upload complete!")
+        # Clear the cached images
+        if 'get_cached_page' in globals():
+            get_cached_page.clear()
         # Reset upload session
         st.session_state['upload_session_started'] = False
         st.session_state['duplicates_count'] = 0
+        st.session_state['processed_hashes'] = set()
+        # Clear any existing review page cache
+        if 'review_page' in st.session_state:
+            del st.session_state['review_page']
+
+@st.cache_data(ttl=300)
+def get_cached_page(page_num):
+    """Get a page of images with caching (5 minutes TTL)"""
+    return get_db().get_images_page(page_num)
 
 def review_page():
     """Handle image review and categorization with pagination."""
@@ -305,7 +318,7 @@ def review_page():
         st.warning("No images to review.")
         return
     
-    # Pagination controls
+    # Pagination controls with memory optimization
     col1, col2, col3 = st.columns([2, 3, 2])
     with col2:
         page_number = st.select_slider(
@@ -324,17 +337,13 @@ def review_page():
                 del st.session_state[key]
     
     # Get current page of images with caching
-    @st.cache_data(ttl=300)  # Cache for 5 minutes
-    def get_cached_page(page_num):
-        return get_db().get_images_page(page_num)
-    
     images = get_cached_page(page_number)
     logger.info(f"Retrieved {len(images)} images for page {page_number}")
     
     # Display page information
     st.write(f"Showing {len(images)} images (Page {page_number} of {total_pages})")
     
-    # Display images in grid
+    # Display images in grid with memory optimization
     cols = st.columns(3)
     for i, image in enumerate(images):
         with cols[i % 3]:
@@ -343,10 +352,10 @@ def review_page():
                     # Decode and display image
                     img_data = base64.b64decode(image['image_data'])
                     img = Image.open(io.BytesIO(img_data))
-                    img.thumbnail((300, 300))  # Resize image for display
+                    img.thumbnail((300, 300))
                     st.image(img, use_column_width=True)
-                    del img  # Clean up image object
-                    del img_data  # Clean up decoded data
+                    del img
+                    del img_data
                     
                     st.write(f"Current: {image['category']} - {image['subcategory']}")
                     
@@ -375,14 +384,12 @@ def review_page():
                                 with cols_subcategories[idx % 3]:
                                     if st.button(subcategory, key=f"{button_key}_{subcategory}"):
                                         get_db().update_categorization(image['id'], selected_category, subcategory)
-                                        # Force cache refresh for this page
                                         get_cached_page.clear()
                                         st.session_state[button_key]["state"] = "main"
                                         st.rerun()
                         else:
                             if st.button("Confirm Uncategorized", key=f"{button_key}_uncategorized"):
                                 get_db().update_categorization(image['id'], 'Uncategorized', 'Uncategorized')
-                                # Force cache refresh for this page
                                 get_cached_page.clear()
                                 st.session_state[button_key]["state"] = "main"
                                 st.rerun()
@@ -395,10 +402,9 @@ def review_page():
                 logger.error(f"Error displaying image: {str(e)}")
                 st.error("Error displaying image")
             finally:
-                # Force garbage collection after processing each image
                 gc.collect()
     
-    # Download functionality
+    # Download functionality with memory optimization
     st.write("---")
     st.subheader("Download All Images")
     
@@ -409,10 +415,12 @@ def review_page():
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
                 file_counter = 1
                 
-                # Get all images for download
+                # Get all images for download with pagination
                 all_images = []
                 for p in range(1, total_pages + 1):
-                    all_images.extend(get_db().get_images_page(p))
+                    page_images = get_db().get_images_page(p)
+                    all_images.extend(page_images)
+                    gc.collect()  # Clear memory after each page
                 
                 sorted_images = sorted(all_images, key=lambda x: (
                     CATEGORY_NUMBERS.get(x['category'], '99'),
@@ -434,6 +442,9 @@ def review_page():
                     
                     file_counter += 1
                     gc.collect()
+                
+                del sorted_images
+                gc.collect()
             
             zip_buffer.seek(0)
             st.download_button(
@@ -448,7 +459,7 @@ def statistics_page():
     """Display AI performance analytics dashboard."""
     st.header("AI Performance Analytics Dashboard")
     
-    stats = get_cached_statistics()
+    stats = get_db().get_statistics()
     token_stats = stats['token_usage']
     
     # Performance Metrics
@@ -486,7 +497,6 @@ def statistics_page():
                      labels={'avg_tokens_per_image': 'Avg. Tokens/Image', 'date': 'Date'})
         st.plotly_chart(fig, use_container_width=True)
         
-        # Clear dataframes to free memory
         del token_usage_df
         gc.collect()
     else:
@@ -569,7 +579,7 @@ def main():
     # Initialize session state for page navigation if not exists
     if 'page' not in st.session_state:
         st.session_state['page'] = 'Upload'
-
+    
     # Check if user is logged in
     if 'user' not in st.session_state or not st.session_state['user']:
         login_page()
@@ -588,7 +598,7 @@ def main():
         if selected_page != st.session_state['page']:
             st.session_state['page'] = selected_page
             st.rerun()
-
+        
         # Display the selected page
         if st.session_state['page'] == "Upload":
             upload_page()
@@ -600,7 +610,7 @@ def main():
             user_management_page()
         else:
             st.warning("You don't have permission to access this page.")
-
+        
         if st.sidebar.button("Logout"):
             st.session_state['user'] = None
             st.session_state['page'] = 'Upload'
