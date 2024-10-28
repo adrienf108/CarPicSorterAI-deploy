@@ -99,6 +99,12 @@ def calculate_image_hash(image):
     # Convert binary to hexadecimal
     return hex(int(bits, 2))[2:].zfill(16)
 
+def clear_duplicate_tracking():
+    """Reset all duplicate tracking session state variables."""
+    st.session_state['duplicates_count'] = 0
+    st.session_state['duplicate_filenames'] = []
+    st.session_state['processed_hashes'] = set()
+
 def process_chunk(chunk, filename, total_chunks, chunk_number, user_id):
     """Process a single chunk of file data"""
     logger.info(f"Processing chunk {chunk_number}/{total_chunks} for {filename}")
@@ -135,6 +141,18 @@ def process_chunk(chunk, filename, total_chunks, chunk_number, user_id):
             os.remove(f"/tmp/{filename}.partial")
         return False
 
+def process_zip_file(filename, file_data, user_id):
+    """Process a zip file containing images"""
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_data)) as z:
+            for filename in z.namelist():
+                if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and not filename.startswith('__MACOSX/'):
+                    with z.open(filename) as file:
+                        process_single_image(filename, file.read(), user_id)
+    except Exception as e:
+        logger.error(f"Error processing zip file {filename}: {str(e)}")
+        st.error(f"Error processing zip file {filename}: {str(e)}")
+
 def process_single_image(filename, file_data, user_id):
     try:
         img = Image.open(io.BytesIO(file_data))
@@ -149,13 +167,17 @@ def process_single_image(filename, file_data, user_id):
                 existing_hashes = cur.fetchall()
                 st.session_state['processed_hashes'].update([h[0] for h in existing_hashes if h[0]])
         
-        # Check for duplicates
+        # Check for duplicates with improved handling
         if img_hash in st.session_state['processed_hashes']:
-            st.session_state['duplicates_count'] = st.session_state.get('duplicates_count', 0) + 1
-            # Track duplicate filename
+            if 'duplicates_count' not in st.session_state:
+                st.session_state['duplicates_count'] = 0
+            st.session_state['duplicates_count'] += 1
+            
             if 'duplicate_filenames' not in st.session_state:
                 st.session_state['duplicate_filenames'] = []
             st.session_state['duplicate_filenames'].append(filename)
+            
+            st.warning(f"Skipped duplicate image: {filename}")  # Add immediate feedback
             logger.info(f"Duplicate image detected: {filename}")
             return
         
@@ -178,18 +200,6 @@ def process_single_image(filename, file_data, user_id):
     except Exception as e:
         logger.error(f"Error processing image {filename}: {str(e)}")
         st.error(f"Error processing image {filename}: {str(e)}")
-
-def process_zip_file(filename, file_data, user_id):
-    """Process a zip file containing images"""
-    try:
-        with zipfile.ZipFile(io.BytesIO(file_data)) as z:
-            for filename in z.namelist():
-                if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and not filename.startswith('__MACOSX/'):
-                    with z.open(filename) as file:
-                        process_single_image(filename, file.read(), user_id)
-    except Exception as e:
-        logger.error(f"Error processing zip file {filename}: {str(e)}")
-        st.error(f"Error processing zip file {filename}: {str(e)}")
 
 def login_page():
     st.header("Login")
@@ -226,23 +236,28 @@ def login_page():
 def upload_page():
     st.header("Upload Car Images")
     
-    # Move duplicates warning to a more prominent position
-    if 'duplicates_count' in st.session_state and st.session_state['duplicates_count'] > 0:
-        st.warning(f"⚠️ {st.session_state['duplicates_count']} duplicate image(s) were detected and automatically skipped.")
-        # Add details about duplicates
-        if 'duplicate_filenames' not in st.session_state:
-            st.session_state['duplicate_filenames'] = []
-        if st.session_state['duplicate_filenames']:
-            with st.expander("View skipped duplicates"):
-                for filename in st.session_state['duplicate_filenames']:
-                    st.text(f"- {filename}")
-    
-    # Reset duplicates tracking at the start of new upload
-    if 'uploaded_files' not in st.session_state:
+    # Initialize session state for duplicates at the start
+    if 'duplicates_count' not in st.session_state:
         st.session_state['duplicates_count'] = 0
+    if 'duplicate_filenames' not in st.session_state:
         st.session_state['duplicate_filenames'] = []
+        
+    # Display warning before file uploader if duplicates were found
+    if st.session_state['duplicates_count'] > 0:
+        st.warning(f"⚠️ {st.session_state['duplicates_count']} duplicate image(s) were detected and automatically skipped.")
+        with st.expander("View skipped duplicates"):
+            for filename in st.session_state['duplicate_filenames']:
+                st.text(f"- {filename}")
     
     uploaded_files = st.file_uploader("Choose images or zip files to upload", type=["jpg", "jpeg", "png", "zip"], accept_multiple_files=True)
+    
+    # Clear duplicate tracking when new files are uploaded
+    if uploaded_files and 'last_upload_count' not in st.session_state:
+        clear_duplicate_tracking()
+        st.session_state['last_upload_count'] = len(uploaded_files)
+    elif uploaded_files and len(uploaded_files) != st.session_state.get('last_upload_count', 0):
+        clear_duplicate_tracking()
+        st.session_state['last_upload_count'] = len(uploaded_files)
     
     if uploaded_files:
         progress_text = st.empty()
