@@ -16,8 +16,8 @@ import numpy as np
 import logging
 import os
 import math
-from datetime import datetime
 import gc
+from datetime import datetime
 
 # Configure logging to be minimal
 logging.basicConfig(level=logging.ERROR)
@@ -208,7 +208,13 @@ def process_zip_file(filename, file_data, user_id):
     finally:
         gc.collect()
 
+@st.cache_data(ttl=300)
+def get_cached_images():
+    """Cache image data for 5 minutes to reduce database load"""
+    return get_db().get_all_images()
+
 def login_page():
+    """Handle user login and registration."""
     st.header("Login")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
@@ -240,12 +246,59 @@ def login_page():
             else:
                 st.error("Please enter both username and password")
 
-@st.cache_data(ttl=300)
-def get_cached_images():
-    """Cache image data for 5 minutes to reduce database load"""
-    return get_db().get_all_images()
+def upload_page():
+    """Handle file uploads and image processing."""
+    st.header("Upload Car Images")
+    
+    # Initialize or reset duplicates count for new upload session
+    if 'upload_session_started' not in st.session_state:
+        st.session_state['upload_session_started'] = True
+        st.session_state['duplicates_count'] = 0
+    
+    # Display warning for duplicate images if any were found
+    if st.session_state.get('duplicates_count', 0) > 0:
+        st.warning(f"{st.session_state['duplicates_count']} duplicate images were skipped.")
+    
+    uploaded_files = st.file_uploader(
+        "Choose image files or a zip file",
+        type=['png', 'jpg', 'jpeg', 'zip'],
+        accept_multiple_files=True
+    )
+    
+    if uploaded_files:
+        progress_text = "Processing files..."
+        progress_bar = st.progress(0)
+        
+        total_files = len(uploaded_files)
+        for i, uploaded_file in enumerate(uploaded_files):
+            file_data = uploaded_file.read()
+            total_size = len(file_data)
+            total_chunks = math.ceil(total_size / CHUNK_SIZE)
+            
+            for chunk_number in range(1, total_chunks + 1):
+                start = (chunk_number - 1) * CHUNK_SIZE
+                end = min(chunk_number * CHUNK_SIZE, total_size)
+                chunk = file_data[start:end]
+                
+                process_chunk(
+                    chunk,
+                    uploaded_file.name,
+                    total_chunks,
+                    chunk_number,
+                    st.session_state['user'].id
+                )
+            
+            # Update progress
+            progress = (i + 1) / total_files
+            progress_bar.progress(progress)
+            
+        st.success("Upload complete!")
+        # Reset upload session
+        st.session_state['upload_session_started'] = False
+        st.session_state['duplicates_count'] = 0
 
 def review_page():
+    """Handle image review and categorization."""
     st.header("Review and Correct Categorizations")
     
     images = get_cached_images()
@@ -344,12 +397,8 @@ def review_page():
         key="download_all_images_button"
     )
 
-@st.cache_data(ttl=300)
-def get_cached_statistics():
-    """Cache statistics for 5 minutes to reduce database load"""
-    return get_db().get_statistics()
-
 def statistics_page():
+    """Display AI performance analytics dashboard."""
     st.header("AI Performance Analytics Dashboard")
     
     stats = get_cached_statistics()
@@ -452,6 +501,7 @@ def statistics_page():
     gc.collect()
 
 def user_management_page():
+    """Handle user management for administrators."""
     st.header("User Management")
     
     users = get_db().get_all_users()
@@ -464,6 +514,7 @@ def user_management_page():
                 st.rerun()
 
 def main():
+    """Main application entry point."""
     # Clean up any old temporary files and force garbage collection
     cleanup_temp_files()
     gc.collect()
