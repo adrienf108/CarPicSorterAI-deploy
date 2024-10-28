@@ -205,12 +205,12 @@ def login_page():
 def upload_page():
     st.header("Upload Car Images")
     
-    # Reset duplicates_count at the beginning of the function
-    st.session_state['duplicates_count'] = 0
+    # Display warning message if there were duplicate images skipped
+    if st.session_state.get('duplicates_count', 0) > 0:
+        st.warning(f"✓ Upload complete! {st.session_state['duplicates_count']} duplicate image(s) were automatically skipped.")
     
-    # Display warning message if there were duplicate images skipped in the previous upload
-    if 'duplicates_count' in st.session_state and st.session_state['duplicates_count'] > 0:
-        st.warning(f"Skipped {st.session_state['duplicates_count']} duplicate image(s) in the previous upload.")
+    # Reset duplicates_count for new upload session
+    st.session_state['duplicates_count'] = 0
     
     uploaded_files = st.file_uploader("Choose images or zip files to upload", type=["jpg", "jpeg", "png", "zip"], accept_multiple_files=True)
     
@@ -246,7 +246,12 @@ def upload_page():
                 
         progress_text.text("Upload complete!")
         progress_bar.progress(1.0)
-        st.success(f"Successfully processed {total_files} files!")
+        
+        # Update success message to include duplicates info
+        if st.session_state.get('duplicates_count', 0) > 0:
+            st.success(f"Successfully processed {total_files} files! ({st.session_state['duplicates_count']} duplicates were automatically skipped)")
+        else:
+            st.success(f"Successfully processed {total_files} files!")
 
 def review_page():
     st.header("Review and Correct Categorizations")
