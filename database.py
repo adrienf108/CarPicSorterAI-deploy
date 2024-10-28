@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import logging
 
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -19,11 +20,6 @@ class Database:
             port=os.environ['PGPORT']
         )
         self.create_tables()
-        
-        self._page_size = 12
-        self._total_images = None
-        self._last_count_time = None
-        self._count_cache_ttl = 60
 
     def create_tables(self):
         with self.conn.cursor() as cur:
@@ -51,6 +47,7 @@ class Database:
                 )
             ''')
             
+            # Add token_usage and image_size columns if they don't exist
             cur.execute('ALTER TABLE images ADD COLUMN IF NOT EXISTS token_usage INTEGER')
             cur.execute('ALTER TABLE images ADD COLUMN IF NOT EXISTS image_size INTEGER')
             
@@ -87,6 +84,7 @@ class Database:
                   category, subcategory, ai_confidence, user_id, 
                   token_usage, image_size))
             
+            # Update token usage statistics
             today = datetime.now().date()
             cur.execute("""
                 INSERT INTO token_usage (date, total_tokens, total_images, total_size)
@@ -98,40 +96,6 @@ class Database:
                     total_size = token_usage.total_size + %s
             """, (today, token_usage, image_size, token_usage, image_size))
         self.conn.commit()
-
-    def get_total_images(self):
-        current_time = datetime.now()
-        if (self._total_images is None or 
-            self._last_count_time is None or 
-            (current_time - self._last_count_time).total_seconds() > self._count_cache_ttl):
-            with self.conn.cursor() as cur:
-                cur.execute('SELECT COUNT(*) FROM images')
-                self._total_images = cur.fetchone()[0]
-                self._last_count_time = current_time
-        return self._total_images
-
-    def get_images_page(self, page_number):
-        offset = (page_number - 1) * self._page_size
-        with self.conn.cursor() as cur:
-            cur.execute('''
-                SELECT id, filename, image_data, category, subcategory, user_id
-                FROM images
-                ORDER BY created_at DESC
-                LIMIT %s OFFSET %s
-            ''', (self._page_size, offset))
-            results = cur.fetchall()
-            logger.info(f"Retrieved {len(results)} images for page {page_number}")
-            return [{
-                'id': row[0],
-                'filename': row[1],
-                'image_data': row[2],
-                'category': row[3],
-                'subcategory': row[4],
-                'user_id': row[5]
-            } for row in results]
-
-    def get_page_size(self):
-        return self._page_size
 
     def get_all_images(self):
         with self.conn.cursor() as cur:
@@ -163,10 +127,12 @@ class Database:
 
     def get_token_usage_stats(self):
         with self.conn.cursor() as cur:
+            # Get total token usage
             cur.execute("SELECT COALESCE(SUM(total_tokens), 0) FROM token_usage")
             result = cur.fetchone()
             total_tokens = result[0] if result else 0
 
+            # Get token usage over time
             cur.execute("""
                 SELECT date, total_tokens, total_images, total_size
                 FROM token_usage
@@ -183,6 +149,7 @@ class Database:
                 for row in results
             ] if results else []
 
+            # Get average tokens per image
             cur.execute("""
                 SELECT 
                     COALESCE(SUM(total_tokens)::float / NULLIF(SUM(total_images), 0), 0)
@@ -199,10 +166,12 @@ class Database:
 
     def get_statistics(self):
         with self.conn.cursor() as cur:
+            # Get total images count
             cur.execute("SELECT COUNT(*) FROM images")
             result = cur.fetchone()
             total_images = result[0] if result else 0
 
+            # Get correct predictions count
             cur.execute("""
                 SELECT COUNT(*) FROM images
                 WHERE category = ai_category AND subcategory = ai_subcategory
@@ -211,6 +180,7 @@ class Database:
             correct_predictions = result[0] if result else 0
             accuracy = (correct_predictions / total_images * 100) if total_images > 0 else 0
 
+            # Get category distribution
             cur.execute("""
                 SELECT category, COUNT(*) as count
                 FROM images
@@ -219,6 +189,7 @@ class Database:
             """)
             category_distribution = [{'category': row[0], 'count': row[1]} for row in cur.fetchall()]
 
+            # Get accuracy over time
             cur.execute("""
                 SELECT DATE(created_at) as date,
                        AVG(CASE WHEN category = ai_category AND subcategory = ai_subcategory THEN 1 ELSE 0 END) * 100 as accuracy
@@ -228,6 +199,7 @@ class Database:
             """)
             accuracy_over_time = [{'date': row[0], 'accuracy': row[1]} for row in cur.fetchall()]
 
+            # Get confusion matrix data
             cur.execute("""
                 SELECT ai_category, category, COUNT(*)
                 FROM images
@@ -243,6 +215,7 @@ class Database:
                 j = category_to_index[ai_cat]
                 confusion_matrix[i, j] = count
 
+            # Get top misclassifications
             cur.execute("""
                 SELECT ai_category, category, COUNT(*) as count
                 FROM images
@@ -256,12 +229,14 @@ class Database:
                 for row in cur.fetchall()
             ]
 
+            # Get confidence distribution
             cur.execute("""
                 SELECT ai_confidence
                 FROM images
             """)
             confidence_distribution = [{'confidence': row[0]} for row in cur.fetchall()]
 
+            # Get token usage statistics
             token_stats = self.get_token_usage_stats()
 
             return {
