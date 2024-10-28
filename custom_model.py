@@ -64,7 +64,7 @@ Where confidence_score is a number between 0 and 1. If you're not confident abou
             
             # Create the message with the image
             message = self.client.messages.create(
-                model="claude-3-haiku-20240307",
+                model="claude-3-opus-20240229",
                 max_tokens=1024,
                 temperature=0,
                 messages=[{
