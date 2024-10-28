@@ -1,19 +1,116 @@
-# Ignore Python bytecode files
+# Python cache files
 __pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
 *.pyc
 
-# Ignore environment-specific files
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+*.whl
+
+# Virtual environment
+venv/
+env/
 .env
+.venv/
+ENV/
 
-# Ignore Streamlit cache
-.streamlit/
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+*.bak
+*.sublime*
 
-# Ignore any log files
-*.log
+# Streamlit
+.streamlit/secrets.toml
+.streamlit/config.toml
 
-# Ignore database files
+# Database files
 *.db
+*.sqlite3
+*.sqlite
+*.sql
 
-# Ignore system files
+# System files
 .DS_Store
 Thumbs.db
+*.tmp
+*.temp
+*.log
+.directory
+
+# Temporary files
+*.tmp
+temp/
+.temp/
+tmp/
+.tmp/
+
+# Cache directories
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Image cache and uploads
+.image_cache/
+image_cache/
+uploads/
+.uploads/
+
+# Replit specific
+.upm/
+.config/
+.local/
+.bash_history
+.pythonlibs/
+.breakpoints
+poetry.lock
+.replit
+*.nix
+.git/
+.gitignore
+.gitattributes
+
+# Package specific
+node_modules/
+package-lock.json
+yarn.lock
+
+# Compiled files
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+
+# Compressed files
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite
+
+# Environment files
+.env.*
+*.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

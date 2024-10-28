@@ -9,20 +9,32 @@ import base64
 import zipfile
 from database import Database
 from ai_model import AIModel
-from image_utils import image_to_base64
+from image_utils import image_to_base64, cleanup_temp_files
 import bcrypt
 import hashlib
 import numpy as np
 import logging
 import os
 import math
+from datetime import datetime
+import gc
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging to be minimal
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
-# Set chunk size to 5MB
+# Set chunk size to 5MB for efficient memory usage
 CHUNK_SIZE = 5 * 1024 * 1024
+
+# Optimize memory usage
+st.set_page_config(
+    page_title="AI-powered Car Image Categorization",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# Force garbage collection
+gc.collect()
 
 # Category and subcategory number mappings
 CATEGORY_NUMBERS = {
@@ -74,9 +86,21 @@ SUBCATEGORY_NUMBERS = {
     }
 }
 
-# Initialize database and AI model
-db = Database()
-ai_model = AIModel()
+# Initialize database and AI model (with lazy loading)
+db = None
+ai_model = None
+
+def get_db():
+    global db
+    if db is None:
+        db = Database()
+    return db
+
+def get_ai_model():
+    global ai_model
+    if ai_model is None:
+        ai_model = AIModel()
+    return ai_model
 
 class User:
     def __init__(self, id, username, role):
@@ -86,13 +110,19 @@ class User:
 
 def calculate_image_hash(image):
     """Calculate a hash for the image to detect duplicates."""
-    return hashlib.md5(image.tobytes()).hexdigest()
+    try:
+        return hashlib.md5(image.tobytes()).hexdigest()
+    finally:
+        gc.collect()
 
 def process_chunk(chunk, filename, total_chunks, chunk_number, user_id):
-    """Process a single chunk of file data"""
+    """Process a single chunk of file data with memory optimization"""
     logger.info(f"Processing chunk {chunk_number}/{total_chunks} for {filename}")
     
     try:
+        # Clean up old temporary files before processing
+        cleanup_temp_files()
+        
         # If this is the first chunk, create a new file
         mode = 'ab' if chunk_number > 1 else 'wb'
         temp_path = f"/tmp/{filename}.partial"
@@ -105,7 +135,7 @@ def process_chunk(chunk, filename, total_chunks, chunk_number, user_id):
             with open(temp_path, 'rb') as f:
                 file_data = f.read()
             
-            # Clean up temporary file
+            # Clean up temporary file immediately after reading
             os.remove(temp_path)
             
             # Process the file based on its type
@@ -123,52 +153,60 @@ def process_chunk(chunk, filename, total_chunks, chunk_number, user_id):
         if os.path.exists(f"/tmp/{filename}.partial"):
             os.remove(f"/tmp/{filename}.partial")
         return False
+    finally:
+        gc.collect()
 
 def process_single_image(filename, file_data, user_id):
-    """Process a single image file"""
+    """Process a single image file with memory optimization"""
     try:
-        img = Image.open(io.BytesIO(file_data))
-        img_hash = calculate_image_hash(img)
-        
-        # Check for duplicates
-        if 'processed_hashes' not in st.session_state:
-            st.session_state['processed_hashes'] = set()
+        with Image.open(io.BytesIO(file_data)) as img:
+            img_hash = calculate_image_hash(img)
             
-        if img_hash in st.session_state['processed_hashes']:
-            st.session_state['duplicates_count'] = st.session_state.get('duplicates_count', 0) + 1
-            return
+            # Check for duplicates
+            if 'processed_hashes' not in st.session_state:
+                st.session_state['processed_hashes'] = set()
+                
+            if img_hash in st.session_state['processed_hashes']:
+                st.session_state['duplicates_count'] = st.session_state.get('duplicates_count', 0) + 1
+                return
+                
+            st.session_state['processed_hashes'].add(img_hash)
             
-        st.session_state['processed_hashes'].add(img_hash)
-        
-        main_category, subcategory, confidence, token_usage, image_size = ai_model.predict(img)
-        logger.info(f"AI Model prediction for {filename}: {main_category} - {subcategory} (Confidence: {confidence})")
-        
-        image_data = image_to_base64(img)
-        db.save_image(filename, image_data, main_category, subcategory, user_id, float(confidence), token_usage, image_size)
-        
-        display_image = img.copy()
-        display_image.thumbnail((300, 300))
-        
-        if main_category == 'Uncategorized':
-            st.image(display_image, caption=f"{filename}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
-        else:
-            st.image(display_image, caption=f"{filename}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
+            main_category, subcategory, confidence, token_usage, image_size = get_ai_model().predict(img)
+            logger.info(f"AI Model prediction for {filename}: {main_category} - {subcategory} (Confidence: {confidence})")
             
+            image_data = image_to_base64(img)
+            get_db().save_image(filename, image_data, main_category, subcategory, user_id, float(confidence), token_usage, image_size)
+            
+            # Create a smaller copy for display
+            display_image = img.copy()
+            display_image.thumbnail((300, 300))
+            
+            if main_category == 'Uncategorized':
+                st.image(display_image, caption=f"{filename}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
+            else:
+                st.image(display_image, caption=f"{filename}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
+                
     except Exception as e:
         logger.error(f"Error processing image {filename}: {str(e)}")
         st.error(f"Error processing image {filename}: {str(e)}")
+    finally:
+        gc.collect()
 
 def process_zip_file(filename, file_data, user_id):
-    """Process a zip file containing images"""
+    """Process a zip file containing images with memory optimization"""
     try:
         with zipfile.ZipFile(io.BytesIO(file_data)) as z:
             for filename in z.namelist():
                 if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and not filename.startswith('__MACOSX/'):
                     with z.open(filename) as file:
                         process_single_image(filename, file.read(), user_id)
+                gc.collect()
     except Exception as e:
         logger.error(f"Error processing zip file {filename}: {str(e)}")
         st.error(f"Error processing zip file {filename}: {str(e)}")
+    finally:
+        gc.collect()
 
 def login_page():
     st.header("Login")
@@ -178,7 +216,7 @@ def login_page():
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Login"):
-            user = db.get_user_by_username(username)
+            user = get_db().get_user_by_username(username)
             if user and bcrypt.checkpw(password.encode('utf-8'), user[2].encode('utf-8')):
                 st.session_state['user'] = User(user[0], user[1], user[3])
                 st.success("Logged in successfully!")
@@ -189,74 +227,28 @@ def login_page():
     with col2:
         if st.button("Register"):
             if username and password:
-                existing_user = db.get_user_by_username(username)
+                existing_user = get_db().get_user_by_username(username)
                 if existing_user:
                     st.error("Username already exists")
                 else:
-                    user_count = len(db.get_all_users())
+                    user_count = len(get_db().get_all_users())
                     role = 'admin' if user_count == 0 else 'user'
-                    user_id = db.create_user(username, password, role)
+                    user_id = get_db().create_user(username, password, role)
                     st.session_state['user'] = User(user_id, username, role)
                     st.success("Registered successfully!")
                     st.rerun()
             else:
                 st.error("Please enter both username and password")
 
-def upload_page():
-    st.header("Upload Car Images")
-    
-    # Display warning message if there were duplicate images skipped
-    if st.session_state.get('duplicates_count', 0) > 0:
-        st.warning(f"✓ Upload complete! {st.session_state['duplicates_count']} duplicate image(s) were automatically skipped.")
-    
-    # Reset duplicates_count for new upload session
-    st.session_state['duplicates_count'] = 0
-    
-    uploaded_files = st.file_uploader("Choose images or zip files to upload", type=["jpg", "jpeg", "png", "zip"], accept_multiple_files=True)
-    
-    if uploaded_files:
-        progress_text = st.empty()
-        progress_bar = st.progress(0)
-        total_files = len(uploaded_files)
-        
-        for i, uploaded_file in enumerate(uploaded_files):
-            try:
-                file_size = len(uploaded_file.getvalue())
-                total_chunks = math.ceil(file_size / CHUNK_SIZE)
-                
-                progress_text.text(f"Processing file {i+1}/{total_files}: {uploaded_file.name}")
-                
-                # Process file in chunks
-                uploaded_file.seek(0)
-                for chunk_number in range(1, total_chunks + 1):
-                    chunk = uploaded_file.read(CHUNK_SIZE)
-                    is_complete = process_chunk(chunk, uploaded_file.name, total_chunks, chunk_number, st.session_state['user'].id)
-                    
-                    # Update progress
-                    chunk_progress = (chunk_number / total_chunks)
-                    total_progress = ((i + chunk_progress) / total_files)
-                    progress_bar.progress(total_progress)
-                    
-                    if is_complete:
-                        logger.info(f"Completed processing {uploaded_file.name}")
-                
-            except Exception as e:
-                logger.error(f"Error processing file {uploaded_file.name}: {str(e)}")
-                st.error(f"Error processing file {uploaded_file.name}: {str(e)}")
-                
-        progress_text.text("Upload complete!")
-        progress_bar.progress(1.0)
-        
-        # Update success message to include duplicates info
-        if st.session_state.get('duplicates_count', 0) > 0:
-            st.success(f"Successfully processed {total_files} files! ({st.session_state['duplicates_count']} duplicates were automatically skipped)")
-        else:
-            st.success(f"Successfully processed {total_files} files!")
+@st.cache_data(ttl=300)
+def get_cached_images():
+    """Cache image data for 5 minutes to reduce database load"""
+    return get_db().get_all_images()
 
 def review_page():
     st.header("Review and Correct Categorizations")
     
-    images = db.get_all_images()
+    images = get_cached_images()
     logger.info(f"Retrieved {len(images)} images for review")
     
     if not images:
@@ -279,7 +271,7 @@ def review_page():
                 if st.session_state[button_key]["state"] == "main":
                     st.write("Select Main Category:")
                     cols_categories = st.columns(3)
-                    for idx, category in enumerate(ai_model.model.main_categories + ['Uncategorized']):
+                    for idx, category in enumerate(get_ai_model().model.main_categories + ['Uncategorized']):
                         with cols_categories[idx % 3]:
                             if st.button(category, key=f"{button_key}_{category}"):
                                 st.session_state[button_key]["state"] = "sub"
@@ -291,17 +283,21 @@ def review_page():
                     if selected_category != 'Uncategorized':
                         st.write(f"Select Subcategory for {selected_category}:")
                         cols_subcategories = st.columns(3)
-                        subcategories = ai_model.model.subcategories[selected_category]
+                        subcategories = get_ai_model().model.subcategories[selected_category]
                         for idx, subcategory in enumerate(subcategories):
                             with cols_subcategories[idx % 3]:
                                 if st.button(subcategory, key=f"{button_key}_{subcategory}"):
-                                    db.update_categorization(image['id'], selected_category, subcategory)
-                                    ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), selected_category, subcategory)
+                                    get_db().update_categorization(image['id'], selected_category, subcategory)
+                                    get_ai_model().learn_from_manual_categorization(
+                                        Image.open(io.BytesIO(base64.b64decode(image['image_data']))),
+                                        selected_category,
+                                        subcategory
+                                    )
                                     st.session_state[button_key]["state"] = "main"
                                     st.rerun()
                     else:
                         if st.button("Confirm Uncategorized", key=f"{button_key}_uncategorized"):
-                            db.update_categorization(image['id'], 'Uncategorized', 'Uncategorized')
+                            get_db().update_categorization(image['id'], 'Uncategorized', 'Uncategorized')
                             st.session_state[button_key]["state"] = "main"
                             st.rerun()
                     
@@ -336,6 +332,7 @@ def review_page():
             zf.writestr(filename, img_bytes)
             
             file_counter += 1
+            gc.collect()
     
     zip_buffer.seek(0)
     
@@ -347,10 +344,15 @@ def review_page():
         key="download_all_images_button"
     )
 
+@st.cache_data(ttl=300)
+def get_cached_statistics():
+    """Cache statistics for 5 minutes to reduce database load"""
+    return get_db().get_statistics()
+
 def statistics_page():
     st.header("AI Performance Analytics Dashboard")
     
-    stats = db.get_statistics()
+    stats = get_cached_statistics()
     token_stats = stats['token_usage']
     
     # Performance Metrics
@@ -366,40 +368,53 @@ def statistics_page():
         st.metric("Avg. Tokens/Image", f"{token_stats['avg_tokens_per_image']:.1f}")
     
     # Token Usage Over Time
-    st.subheader("Token Usage Over Time")
     if token_stats['usage_over_time']:
         token_usage_df = pd.DataFrame(token_stats['usage_over_time'])
-        fig = px.line(token_usage_df, x='date', y='tokens', 
+        
+        # Daily Token Usage
+        fig = px.line(token_usage_df, x='date', y='tokens',
                      title='Daily Token Usage',
                      labels={'tokens': 'Tokens Used', 'date': 'Date'})
-        st.plotly_chart(fig)
-
+        st.plotly_chart(fig, use_container_width=True)
+        
         # Images Processed Over Time
         fig = px.line(token_usage_df, x='date', y='images',
                      title='Daily Images Processed',
                      labels={'images': 'Images Processed', 'date': 'Date'})
-        st.plotly_chart(fig)
-
+        st.plotly_chart(fig, use_container_width=True)
+        
         # Average Token Usage per Image Over Time
         token_usage_df['avg_tokens_per_image'] = token_usage_df['tokens'] / token_usage_df['images']
         fig = px.line(token_usage_df, x='date', y='avg_tokens_per_image',
                      title='Average Tokens per Image Over Time',
                      labels={'avg_tokens_per_image': 'Avg. Tokens/Image', 'date': 'Date'})
-        st.plotly_chart(fig)
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Clear dataframes to free memory
+        del token_usage_df
+        gc.collect()
     else:
         st.info("No token usage data available yet. Upload some images to see the statistics.")
     
-    # Original Statistics
+    # Category Distribution
     st.subheader("Category Distribution")
     category_df = pd.DataFrame(stats['category_distribution'])
-    fig = px.pie(category_df, values='count', names='category', title='Category Distribution')
-    st.plotly_chart(fig)
+    fig = px.pie(category_df, values='count', names='category',
+                 title='Category Distribution')
+    st.plotly_chart(fig, use_container_width=True)
+    del category_df
+    gc.collect()
     
+    # Accuracy Over Time
     st.subheader("Accuracy Over Time")
     accuracy_df = pd.DataFrame(stats['accuracy_over_time'])
-    fig = px.line(accuracy_df, x='date', y='accuracy', title='AI Model Accuracy Over Time')
-    st.plotly_chart(fig)
+    fig = px.line(accuracy_df, x='date', y='accuracy',
+                  title='AI Model Accuracy Over Time')
+    st.plotly_chart(fig, use_container_width=True)
+    del accuracy_df
+    gc.collect()
     
+    # Confusion Matrix
     st.subheader("Confusion Matrix")
     confusion_matrix = np.array(stats['confusion_matrix'])
     categories = stats['confusion_categories']
@@ -416,32 +431,42 @@ def statistics_page():
         xaxis_title='Predicted Category',
         yaxis_title='True Category'
     )
-    st.plotly_chart(fig)
+    st.plotly_chart(fig, use_container_width=True)
+    del confusion_matrix
+    gc.collect()
     
+    # Top Misclassifications
     st.subheader("Top Misclassifications")
-    misclassifications = stats['top_misclassifications']
-    misclass_df = pd.DataFrame(misclassifications)
+    misclass_df = pd.DataFrame(stats['top_misclassifications'])
     st.table(misclass_df)
+    del misclass_df
+    gc.collect()
     
+    # Confidence Distribution
     st.subheader("Confidence Distribution")
     confidence_df = pd.DataFrame(stats['confidence_distribution'])
-    fig = px.histogram(confidence_df, x='confidence', nbins=20, title='Distribution of AI Confidence Scores')
-    st.plotly_chart(fig)
+    fig = px.histogram(confidence_df, x='confidence', nbins=20,
+                      title='Distribution of AI Confidence Scores')
+    st.plotly_chart(fig, use_container_width=True)
+    del confidence_df
+    gc.collect()
 
 def user_management_page():
     st.header("User Management")
     
-    users = db.get_all_users()
+    users = get_db().get_all_users()
     for user in users:
         st.write(f"Username: {user['username']}, Role: {user['role']}")
         if user['role'] == 'user':
             if st.button(f"Promote {user['username']} to Admin"):
-                db.update_user_role(user['id'], 'admin')
+                get_db().update_user_role(user['id'], 'admin')
                 st.success(f"{user['username']} promoted to Admin")
                 st.rerun()
 
 def main():
-    st.set_page_config(page_title="AI-powered Car Image Categorization", layout="wide")
+    # Clean up any old temporary files and force garbage collection
+    cleanup_temp_files()
+    gc.collect()
     
     # Initialize session state for page navigation if not exists
     if 'page' not in st.session_state:
