@@ -9,7 +9,7 @@ import base64
 import zipfile
 from database import Database
 from ai_model import AIModel
-from image_utils import image_to_base64, optimize_image
+from image_utils import image_to_base64
 import bcrypt
 import hashlib
 import numpy as np
@@ -24,6 +24,56 @@ logger = logging.getLogger(__name__)
 # Set chunk size to 5MB
 CHUNK_SIZE = 5 * 1024 * 1024
 
+# Category and subcategory number mappings
+CATEGORY_NUMBERS = {
+    'Exterior': '01',
+    'Interior': '02',
+    'Engine': '03',
+    'Undercarriage': '04',
+    'Documents': '05',
+    'Uncategorized': '99'
+}
+
+SUBCATEGORY_NUMBERS = {
+    'Exterior': {
+        '3/4 front view': '01',
+        'Side profile': '02',
+        '3/4 rear view': '03',
+        'Rear view': '04',
+        'Wheels': '05',
+        'Details': '06',
+        'Defects': '07'
+    },
+    'Interior': {
+        'Full interior view': '01',
+        'Dashboard': '02',
+        'Front seats': '03',
+        "Driver's seat": '04',
+        'Rear seats': '05',
+        'Steering wheel': '06',
+        'Gear shift': '07',
+        'Pedals and floor mats': '08',
+        'Gauges/Instrument cluster': '09',
+        'Details': '10',
+        'Trunk/Boot': '11'
+    },
+    'Engine': {
+        'Full view': '01',
+        'Detail': '02'
+    },
+    'Undercarriage': {
+        'Undercarriage': '01'
+    },
+    'Documents': {
+        'Invoices/Receipts': '01',
+        'Service book': '02',
+        'Technical inspections/MOT certificates': '03'
+    },
+    'Uncategorized': {
+        'Uncategorized': '99'
+    }
+}
+
 # Initialize database and AI model
 db = Database()
 ai_model = AIModel()
@@ -37,60 +87,6 @@ class User:
 def calculate_image_hash(image):
     """Calculate a hash for the image to detect duplicates."""
     return hashlib.md5(image.tobytes()).hexdigest()
-
-def process_single_image(filename, file_data, user_id):
-    """Process a single image file with optimization"""
-    try:
-        img = Image.open(io.BytesIO(file_data))
-        img_hash = calculate_image_hash(img)
-        
-        # Check for duplicates
-        if 'processed_hashes' not in st.session_state:
-            st.session_state['processed_hashes'] = set()
-            
-        if img_hash in st.session_state['processed_hashes']:
-            st.session_state['duplicates_count'] = st.session_state.get('duplicates_count', 0) + 1
-            return
-            
-        st.session_state['processed_hashes'].add(img_hash)
-        
-        # Get AI predictions
-        main_category, subcategory, confidence, token_usage, image_size = ai_model.predict(img)
-        logger.info(f"AI Model prediction for {filename}: {main_category} - {subcategory} (Confidence: {confidence})")
-        
-        # Convert image to optimized base64
-        image_data = image_to_base64(img, optimize=True)
-        if not image_data:
-            st.error(f"Error optimizing image {filename}")
-            return
-            
-        # Save optimized image to database
-        db.save_image(filename, image_data, main_category, subcategory, user_id, float(confidence), token_usage, image_size)
-        
-        # Create thumbnail for display
-        display_image = img.copy()
-        display_image.thumbnail((300, 300))
-        
-        if main_category == 'Uncategorized':
-            st.image(display_image, caption=f"{filename}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
-        else:
-            st.image(display_image, caption=f"{filename}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
-            
-    except Exception as e:
-        logger.error(f"Error processing image {filename}: {str(e)}")
-        st.error(f"Error processing image {filename}: {str(e)}")
-
-def process_zip_file(filename, file_data, user_id):
-    """Process a zip file containing images"""
-    try:
-        with zipfile.ZipFile(io.BytesIO(file_data)) as z:
-            for filename in z.namelist():
-                if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and not filename.startswith('__MACOSX/'):
-                    with z.open(filename) as file:
-                        process_single_image(filename, file.read(), user_id)
-    except Exception as e:
-        logger.error(f"Error processing zip file {filename}: {str(e)}")
-        st.error(f"Error processing zip file {filename}: {str(e)}")
 
 def process_chunk(chunk, filename, total_chunks, chunk_number, user_id):
     """Process a single chunk of file data"""
@@ -127,6 +123,52 @@ def process_chunk(chunk, filename, total_chunks, chunk_number, user_id):
         if os.path.exists(f"/tmp/{filename}.partial"):
             os.remove(f"/tmp/{filename}.partial")
         return False
+
+def process_single_image(filename, file_data, user_id):
+    """Process a single image file"""
+    try:
+        img = Image.open(io.BytesIO(file_data))
+        img_hash = calculate_image_hash(img)
+        
+        # Check for duplicates
+        if 'processed_hashes' not in st.session_state:
+            st.session_state['processed_hashes'] = set()
+            
+        if img_hash in st.session_state['processed_hashes']:
+            st.session_state['duplicates_count'] = st.session_state.get('duplicates_count', 0) + 1
+            return
+            
+        st.session_state['processed_hashes'].add(img_hash)
+        
+        main_category, subcategory, confidence, token_usage, image_size = ai_model.predict(img)
+        logger.info(f"AI Model prediction for {filename}: {main_category} - {subcategory} (Confidence: {confidence})")
+        
+        image_data = image_to_base64(img)
+        db.save_image(filename, image_data, main_category, subcategory, user_id, float(confidence), token_usage, image_size)
+        
+        display_image = img.copy()
+        display_image.thumbnail((300, 300))
+        
+        if main_category == 'Uncategorized':
+            st.image(display_image, caption=f"{filename}: Uncategorized (Confidence: {confidence:.2f})", use_column_width=True)
+        else:
+            st.image(display_image, caption=f"{filename}: {main_category} - {subcategory} (Confidence: {confidence:.2f})", use_column_width=True)
+            
+    except Exception as e:
+        logger.error(f"Error processing image {filename}: {str(e)}")
+        st.error(f"Error processing image {filename}: {str(e)}")
+
+def process_zip_file(filename, file_data, user_id):
+    """Process a zip file containing images"""
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_data)) as z:
+            for filename in z.namelist():
+                if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and not filename.startswith('__MACOSX/'):
+                    with z.open(filename) as file:
+                        process_single_image(filename, file.read(), user_id)
+    except Exception as e:
+        logger.error(f"Error processing zip file {filename}: {str(e)}")
+        st.error(f"Error processing zip file {filename}: {str(e)}")
 
 def login_page():
     st.header("Login")
@@ -225,10 +267,7 @@ def review_page():
     for i, image in enumerate(images):
         with cols[i % 3]:
             with st.container():
-                img_data = base64.b64decode(image['image_data'])
-                display_image = Image.open(io.BytesIO(img_data))
-                display_image.thumbnail((300, 300))
-                st.image(display_image, use_column_width=True)
+                st.image(base64.b64decode(image['image_data']), use_column_width=True)
                 logger.info(f"Displaying image {image['filename']} with categories: {image['category']} - {image['subcategory']}")
                 st.write(f"Current: {image['category']} - {image['subcategory']}")
                 
@@ -257,7 +296,7 @@ def review_page():
                             with cols_subcategories[idx % 3]:
                                 if st.button(subcategory, key=f"{button_key}_{subcategory}"):
                                     db.update_categorization(image['id'], selected_category, subcategory)
-                                    ai_model.learn_from_manual_categorization(display_image, selected_category, subcategory)
+                                    ai_model.learn_from_manual_categorization(Image.open(io.BytesIO(base64.b64decode(image['image_data']))), selected_category, subcategory)
                                     st.session_state[button_key]["state"] = "main"
                                     st.rerun()
                     else:
@@ -277,56 +316,6 @@ def review_page():
     
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
         file_counter = 1
-        
-        # Category and subcategory number mappings
-        CATEGORY_NUMBERS = {
-            'Exterior': '01',
-            'Interior': '02',
-            'Engine': '03',
-            'Undercarriage': '04',
-            'Documents': '05',
-            'Uncategorized': '99'
-        }
-
-        SUBCATEGORY_NUMBERS = {
-            'Exterior': {
-                '3/4 front view': '01',
-                'Side profile': '02',
-                '3/4 rear view': '03',
-                'Rear view': '04',
-                'Wheels': '05',
-                'Details': '06',
-                'Defects': '07'
-            },
-            'Interior': {
-                'Full interior view': '01',
-                'Dashboard': '02',
-                'Front seats': '03',
-                "Driver's seat": '04',
-                'Rear seats': '05',
-                'Steering wheel': '06',
-                'Gear shift': '07',
-                'Pedals and floor mats': '08',
-                'Gauges/Instrument cluster': '09',
-                'Details': '10',
-                'Trunk/Boot': '11'
-            },
-            'Engine': {
-                'Full view': '01',
-                'Detail': '02'
-            },
-            'Undercarriage': {
-                'Undercarriage': '01'
-            },
-            'Documents': {
-                'Invoices/Receipts': '01',
-                'Service book': '02',
-                'Technical inspections/MOT certificates': '03'
-            },
-            'Uncategorized': {
-                'Uncategorized': '99'
-            }
-        }
         
         sorted_images = sorted(images, key=lambda x: (
             CATEGORY_NUMBERS.get(x['category'], '99'),
