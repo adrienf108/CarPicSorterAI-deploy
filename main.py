@@ -17,7 +17,7 @@ import logging
 import os
 import math
 import gc
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Configure logging to be minimal
 logging.basicConfig(level=logging.ERROR)
@@ -26,15 +26,9 @@ logger = logging.getLogger(__name__)
 # Set chunk size to 5MB for efficient memory usage
 CHUNK_SIZE = 5 * 1024 * 1024
 
-# Optimize memory usage
-st.set_page_config(
-    page_title="AI-powered Car Image Categorization",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
-# Force garbage collection
-gc.collect()
+# Constants for cleanup
+CLEANUP_DAYS_THRESHOLD = 30
+CLEANUP_SIZE_THRESHOLD_MB = 1000
 
 # Category and subcategory number mappings
 CATEGORY_NUMBERS = {
@@ -213,42 +207,43 @@ def get_cached_images():
     """Cache image data for 5 minutes to reduce database load"""
     return get_db().get_all_images()
 
-def login_page():
-    """Handle user login and registration."""
-    st.header("Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Login"):
-            user = get_db().get_user_by_username(username)
-            if user and bcrypt.checkpw(password.encode('utf-8'), user[2].encode('utf-8')):
-                st.session_state['user'] = User(user[0], user[1], user[3])
-                st.success("Logged in successfully!")
-                st.rerun()
-            else:
-                st.error("Invalid username or password")
-    
-    with col2:
-        if st.button("Register"):
-            if username and password:
-                existing_user = get_db().get_user_by_username(username)
-                if existing_user:
-                    st.error("Username already exists")
-                else:
-                    user_count = len(get_db().get_all_users())
-                    role = 'admin' if user_count == 0 else 'user'
-                    user_id = get_db().create_user(username, password, role)
-                    st.session_state['user'] = User(user_id, username, role)
-                    st.success("Registered successfully!")
-                    st.rerun()
-            else:
-                st.error("Please enter both username and password")
+@st.cache_data(ttl=300)
+def get_cached_statistics():
+    """Cache statistics for 5 minutes to reduce database load"""
+    return get_db().get_statistics()
+
+def check_and_cleanup_uploads():
+    """Check and cleanup old uploads if needed"""
+    try:
+        if 'last_cleanup' not in st.session_state:
+            st.session_state['last_cleanup'] = datetime.now() - timedelta(days=1)  # Force first cleanup
+            
+        # Check if it's time for cleanup (once per day)
+        if datetime.now() - st.session_state['last_cleanup'] > timedelta(days=1):
+            deleted_count = get_db().clear_old_uploads(
+                days_threshold=CLEANUP_DAYS_THRESHOLD,
+                size_threshold_mb=CLEANUP_SIZE_THRESHOLD_MB
+            )
+            if deleted_count > 0:
+                st.warning(f"Cleaned up {deleted_count} old or unused images to free up space.")
+            st.session_state['last_cleanup'] = datetime.now()
+            
+            # Clear memory caches
+            if 'image_cache' in st.session_state:
+                del st.session_state['image_cache']
+            if 'stats_cache' in st.session_state:
+                del st.session_state['stats_cache']
+            gc.collect()
+            
+    except Exception as e:
+        logger.error(f"Error during cleanup: {str(e)}")
 
 def upload_page():
     """Handle file uploads and image processing."""
     st.header("Upload Car Images")
+    
+    # Check and perform cleanup if needed
+    check_and_cleanup_uploads()
     
     # Initialize or reset duplicates count for new upload session
     if 'upload_session_started' not in st.session_state:
@@ -258,6 +253,20 @@ def upload_page():
     # Display warning for duplicate images if any were found
     if st.session_state.get('duplicates_count', 0) > 0:
         st.warning(f"{st.session_state['duplicates_count']} duplicate images were skipped.")
+    
+    # Display storage status
+    with st.expander("Storage Status"):
+        try:
+            with get_db().conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*), SUM(image_size) FROM images")
+                count, total_size = cur.fetchone()
+                if total_size:
+                    total_size_mb = total_size / (1024 * 1024)
+                    st.info(f"Current storage: {total_size_mb:.2f}MB used by {count} images")
+                    if total_size_mb > CLEANUP_SIZE_THRESHOLD_MB * 0.8:  # 80% of threshold
+                        st.warning("Storage usage is high. Old images may be automatically removed.")
+        except Exception as e:
+            logger.error(f"Error getting storage status: {str(e)}")
     
     uploaded_files = st.file_uploader(
         "Choose image files or a zip file",
@@ -296,209 +305,43 @@ def upload_page():
         # Reset upload session
         st.session_state['upload_session_started'] = False
         st.session_state['duplicates_count'] = 0
-
-def review_page():
-    """Handle image review and categorization."""
-    st.header("Review and Correct Categorizations")
-    
-    images = get_cached_images()
-    logger.info(f"Retrieved {len(images)} images for review")
-    
-    if not images:
-        st.warning("No images to review.")
-        return
-
-    cols = st.columns(3)
-    for i, image in enumerate(images):
-        with cols[i % 3]:
-            with st.container():
-                st.image(base64.b64decode(image['image_data']), use_column_width=True)
-                logger.info(f"Displaying image {image['filename']} with categories: {image['category']} - {image['subcategory']}")
-                st.write(f"Current: {image['category']} - {image['subcategory']}")
-                
-                button_key = f"buttons_{image['id']}"
-                
-                if button_key not in st.session_state:
-                    st.session_state[button_key] = {"state": "main", "selected_category": None}
-                
-                if st.session_state[button_key]["state"] == "main":
-                    st.write("Select Main Category:")
-                    cols_categories = st.columns(3)
-                    for idx, category in enumerate(get_ai_model().model.main_categories + ['Uncategorized']):
-                        with cols_categories[idx % 3]:
-                            if st.button(category, key=f"{button_key}_{category}"):
-                                st.session_state[button_key]["state"] = "sub"
-                                st.session_state[button_key]["selected_category"] = category
-                                st.rerun()
-                
-                elif st.session_state[button_key]["state"] == "sub":
-                    selected_category = st.session_state[button_key]["selected_category"]
-                    if selected_category != 'Uncategorized':
-                        st.write(f"Select Subcategory for {selected_category}:")
-                        cols_subcategories = st.columns(3)
-                        subcategories = get_ai_model().model.subcategories[selected_category]
-                        for idx, subcategory in enumerate(subcategories):
-                            with cols_subcategories[idx % 3]:
-                                if st.button(subcategory, key=f"{button_key}_{subcategory}"):
-                                    get_db().update_categorization(image['id'], selected_category, subcategory)
-                                    get_ai_model().learn_from_manual_categorization(
-                                        Image.open(io.BytesIO(base64.b64decode(image['image_data']))),
-                                        selected_category,
-                                        subcategory
-                                    )
-                                    st.session_state[button_key]["state"] = "main"
-                                    st.rerun()
-                    else:
-                        if st.button("Confirm Uncategorized", key=f"{button_key}_uncategorized"):
-                            get_db().update_categorization(image['id'], 'Uncategorized', 'Uncategorized')
-                            st.session_state[button_key]["state"] = "main"
-                            st.rerun()
-                    
-                    if st.button("Back", key=f"{button_key}_back"):
-                        st.session_state[button_key]["state"] = "main"
-                        st.rerun()
-
-    st.write("---")
-    st.subheader("Download All Images")
-    
-    zip_buffer = io.BytesIO()
-    
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        file_counter = 1
         
-        sorted_images = sorted(images, key=lambda x: (
-            CATEGORY_NUMBERS.get(x['category'], '99'),
-            SUBCATEGORY_NUMBERS.get(x['category'], {}).get(x['subcategory'], '99')
-        ))
-        
-        for image in sorted_images:
-            cat_num = CATEGORY_NUMBERS.get(image['category'], '99')
-            subcat_num = SUBCATEGORY_NUMBERS.get(image['category'], {}).get(image['subcategory'], '99')
-            
-            _, ext = os.path.splitext(image['filename'])
-            if not ext:
-                ext = '.jpg'
-            
-            filename = f"{cat_num}{subcat_num}_{file_counter:04d}{ext}"
-            
-            img_bytes = base64.b64decode(image['image_data'])
-            zf.writestr(filename, img_bytes)
-            
-            file_counter += 1
-            gc.collect()
-    
-    zip_buffer.seek(0)
-    
-    st.download_button(
-        label="Download All Images (Organized by Category)",
-        data=zip_buffer,
-        file_name="all_car_images.zip",
-        mime="application/zip",
-        key="download_all_images_button"
-    )
+        # Force cleanup check after large uploads
+        if total_files > 10:
+            st.session_state['last_cleanup'] = datetime.now() - timedelta(days=1)
 
-def statistics_page():
-    """Display AI performance analytics dashboard."""
-    st.header("AI Performance Analytics Dashboard")
+def login_page():
+    """Handle user login and registration."""
+    st.header("Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
     
-    stats = get_cached_statistics()
-    token_stats = stats['token_usage']
-    
-    # Performance Metrics
-    st.subheader("Performance Metrics")
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2 = st.columns(2)
     with col1:
-        st.metric("Total Images", stats['total_images'])
+        if st.button("Login"):
+            user = get_db().get_user_by_username(username)
+            if user and bcrypt.checkpw(password.encode('utf-8'), user[2].encode('utf-8')):
+                st.session_state['user'] = User(user[0], user[1], user[3])
+                st.success("Logged in successfully!")
+                st.rerun()
+            else:
+                st.error("Invalid username or password")
+    
     with col2:
-        st.metric("Overall Accuracy", f"{stats['accuracy']:.2f}%")
-    with col3:
-        st.metric("Total Tokens Used", f"{token_stats['total_tokens']:,}")
-    with col4:
-        st.metric("Avg. Tokens/Image", f"{token_stats['avg_tokens_per_image']:.1f}")
-    
-    # Token Usage Over Time
-    if token_stats['usage_over_time']:
-        token_usage_df = pd.DataFrame(token_stats['usage_over_time'])
-        
-        # Daily Token Usage
-        fig = px.line(token_usage_df, x='date', y='tokens',
-                     title='Daily Token Usage',
-                     labels={'tokens': 'Tokens Used', 'date': 'Date'})
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Images Processed Over Time
-        fig = px.line(token_usage_df, x='date', y='images',
-                     title='Daily Images Processed',
-                     labels={'images': 'Images Processed', 'date': 'Date'})
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Average Token Usage per Image Over Time
-        token_usage_df['avg_tokens_per_image'] = token_usage_df['tokens'] / token_usage_df['images']
-        fig = px.line(token_usage_df, x='date', y='avg_tokens_per_image',
-                     title='Average Tokens per Image Over Time',
-                     labels={'avg_tokens_per_image': 'Avg. Tokens/Image', 'date': 'Date'})
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Clear dataframes to free memory
-        del token_usage_df
-        gc.collect()
-    else:
-        st.info("No token usage data available yet. Upload some images to see the statistics.")
-    
-    # Category Distribution
-    st.subheader("Category Distribution")
-    category_df = pd.DataFrame(stats['category_distribution'])
-    fig = px.pie(category_df, values='count', names='category',
-                 title='Category Distribution')
-    st.plotly_chart(fig, use_container_width=True)
-    del category_df
-    gc.collect()
-    
-    # Accuracy Over Time
-    st.subheader("Accuracy Over Time")
-    accuracy_df = pd.DataFrame(stats['accuracy_over_time'])
-    fig = px.line(accuracy_df, x='date', y='accuracy',
-                  title='AI Model Accuracy Over Time')
-    st.plotly_chart(fig, use_container_width=True)
-    del accuracy_df
-    gc.collect()
-    
-    # Confusion Matrix
-    st.subheader("Confusion Matrix")
-    confusion_matrix = np.array(stats['confusion_matrix'])
-    categories = stats['confusion_categories']
-    
-    fig = go.Figure(data=go.Heatmap(
-        z=confusion_matrix,
-        x=categories,
-        y=categories,
-        hoverongaps=False,
-        colorscale='Viridis'
-    ))
-    fig.update_layout(
-        title='Confusion Matrix',
-        xaxis_title='Predicted Category',
-        yaxis_title='True Category'
-    )
-    st.plotly_chart(fig, use_container_width=True)
-    del confusion_matrix
-    gc.collect()
-    
-    # Top Misclassifications
-    st.subheader("Top Misclassifications")
-    misclass_df = pd.DataFrame(stats['top_misclassifications'])
-    st.table(misclass_df)
-    del misclass_df
-    gc.collect()
-    
-    # Confidence Distribution
-    st.subheader("Confidence Distribution")
-    confidence_df = pd.DataFrame(stats['confidence_distribution'])
-    fig = px.histogram(confidence_df, x='confidence', nbins=20,
-                      title='Distribution of AI Confidence Scores')
-    st.plotly_chart(fig, use_container_width=True)
-    del confidence_df
-    gc.collect()
+        if st.button("Register"):
+            if username and password:
+                existing_user = get_db().get_user_by_username(username)
+                if existing_user:
+                    st.error("Username already exists")
+                else:
+                    user_count = len(get_db().get_all_users())
+                    role = 'admin' if user_count == 0 else 'user'
+                    user_id = get_db().create_user(username, password, role)
+                    st.session_state['user'] = User(user_id, username, role)
+                    st.success("Registered successfully!")
+                    st.rerun()
+            else:
+                st.error("Please enter both username and password")
 
 def user_management_page():
     """Handle user management for administrators."""
