@@ -1,5 +1,0 @@
-python3-dev
-postgresql
-postgresql-contrib
-libpq-dev
-gcc
