@@ -1,27 +1,10 @@
 [server]
-headless = true
+port = 8080
 address = "0.0.0.0"
-port = 5000
-maxUploadSize = 1000
-enableXsrfProtection = false
-enableCORS = false
-maxMessageSize = 200
-
-[logger]
-level = "error"
-messageFormat = "%(asctime)s - %(message)s"
 
 [theme]
-base = "light"
-
-[browser]
-gatherUsageStats = false
-
-[runner]
-magicEnabled = false
-installTracer = false
-fixMatplotlib = false
-
-[client]
-showErrorDetails = false
-toolbarMode = "minimal"
+primaryColor = "#F63366"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#262730"
+font = "sans serif"
