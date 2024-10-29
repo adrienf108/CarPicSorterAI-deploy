@@ -22,6 +22,7 @@ class Database:
         self.create_tables()
 
     def create_tables(self):
+        """Create necessary database tables if they don't exist"""
         with self.conn.cursor() as cur:
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS users (
@@ -66,20 +67,68 @@ class Database:
         """Clear all previous uploads for a user when starting a new session"""
         try:
             with self.conn.cursor() as cur:
-                # Delete all images uploaded by the user
+                # Begin transaction
+                cur.execute("BEGIN")
+                
+                # Get IDs of images to be deleted
+                cur.execute("""
+                    SELECT id, filename
+                    FROM images 
+                    WHERE user_id = %s
+                """, (user_id,))
+                images_to_delete = cur.fetchall()
+                
+                # Delete from images table
                 cur.execute("""
                     DELETE FROM images 
                     WHERE user_id = %s
-                    RETURNING id, filename
                 """, (user_id,))
-                deleted = cur.fetchall()
+                
+                # Clean up orphaned token_usage entries
+                cur.execute("""
+                    DELETE FROM token_usage
+                    WHERE date < CURRENT_DATE
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM images
+                        WHERE DATE(images.created_at) = token_usage.date
+                    )
+                """)
+                
+                # Commit transaction
                 self.conn.commit()
-                logger.info(f"Cleared {len(deleted)} previous uploads for user {user_id}")
-                return len(deleted)
+                
+                deleted_count = len(images_to_delete)
+                logger.info(f"Cleared {deleted_count} previous uploads for user {user_id}")
+                
+                # Log detailed information about deleted images
+                for img_id, filename in images_to_delete:
+                    logger.info(f"Deleted image ID {img_id}: {filename}")
+                
+                return deleted_count
+                
         except Exception as e:
             logger.error(f"Error clearing previous uploads: {str(e)}")
             self.conn.rollback()
             return 0
+        finally:
+            # Ensure connection is still valid
+            if self.conn.closed:
+                self.conn = psycopg2.connect(
+                    host=os.environ['PGHOST'],
+                    database=os.environ['PGDATABASE'],
+                    user=os.environ['PGUSER'],
+                    password=os.environ['PGPASSWORD'],
+                    port=os.environ['PGPORT']
+                )
+
+    def __del__(self):
+        """Ensure proper cleanup of database connection"""
+        try:
+            if hasattr(self, 'conn') and self.conn and not self.conn.closed:
+                self.conn.close()
+        except Exception as e:
+            logger.error(f"Error closing database connection: {str(e)}")
 
     def get_user_by_username(self, username):
         try:
